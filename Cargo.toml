@@ -1,0 +1,23 @@
+[package]
+name = "rootwatch"
+version = "0.3.0"
+edition = "2024"
+description = "Read-only Linux filesystem scanner for a future SOC-style disk TUI"
+license = "GPL-3.0-only"
+
+[lib]
+name = "rootwatch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rootwatch"
+path = "src/main.rs"
+
+[dependencies]
+rustix = { version = "1.1", features = ["fs", "process"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
