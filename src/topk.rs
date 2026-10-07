@@ -70,18 +70,18 @@ impl<T> TopK<T> {
         }
         if self.heap.len() < self.k {
             self.heap.push(Reverse(Entry { key, item }));
-        } else if let Some(min) = self.heap.peek() {
-            if key > min.0.key {
-                self.heap.pop();
-                self.heap.push(Reverse(Entry { key, item }));
-            }
+        } else if let Some(min) = self.heap.peek()
+            && key > min.0.key
+        {
+            self.heap.pop();
+            self.heap.push(Reverse(Entry { key, item }));
         }
     }
 
     /// Best first.
     pub fn into_sorted_desc(self) -> Vec<T> {
         let mut v: Vec<_> = self.heap.into_vec();
-        v.sort_unstable_by(|a, b| b.0.key.cmp(&a.0.key));
+        v.sort_unstable_by_key(|a| std::cmp::Reverse(a.0.key));
         v.into_iter().map(|e| e.0.item).collect()
     }
 

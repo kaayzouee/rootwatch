@@ -1,0 +1,30 @@
+ ROOTWATCH v0.4.0  /tmp/rootwatch-demo  root filesystem only                         ready (420 ms)
+ 1 Overview   2 Findings   3 Tree   4 Files   5 Coverage   6 Pools   7 Zones
+┌ Coverage ────────────────────────────────────────────────────────────────────────────────────────┐
+│░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ 0.0%   MINIMAL                                                     │
+│walked 43.09 MiB of 95.00 GiB used                                                                │
+│Confidence  LOW                                                                                   │
+│Problems    0 permission denied, 0 error entries                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌ Why walked allocation can differ from filesystem usage ──────────────────────────────────────────┐
+│[unattributed] ~94.96 GiB                                                                         │
+│  /dev/vda: filesystem metadata, journal, snapshots, deleted-but-open files or space hidden under │
+│  mountpoints                                                                                     │
+│                                                                                                  │
+│Storage pools                                                                                     │
+│/dev/vda  0.0% (43.09 MiB of 95.00 GiB) LOW                                                       │
+│                                                                                                  │
+│Permission denied (0)                                                                             │
+│none                                                                                              │
+│                                                                                                  │
+│Unreadable (I/O error) (0)                                                                        │
+│none                                                                                              │
+│                                                                                                  │
+│Pruned paths (0)                                                                                  │
+│none                                                                                              │
+│                                                                                                  │
+│Skipped mounts (0)                                                                                │
+│none                                                                                              │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+↑↓ Scroll  Tab Next view  r Rescan  ? Help  q Quit

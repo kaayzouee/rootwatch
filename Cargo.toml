@@ -1,6 +1,6 @@
 [package]
 name = "rootwatch"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Read-only Linux filesystem scanner for a future SOC-style disk TUI"
 license = "GPL-3.0-only"
@@ -14,7 +14,9 @@ name = "rootwatch"
 path = "src/main.rs"
 
 [dependencies]
+ratatui = { version = "0.30", default-features = false, features = ["crossterm", "layout-cache"] }
 rustix = { version = "1.1", features = ["fs", "process"] }
+tui-input = { version = "0.15.5", default-features = false }
 
 [profile.release]
 opt-level = 3

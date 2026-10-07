@@ -8,8 +8,8 @@
 // identical scan with the same scope and prints a compact report on stdout.
 // Comparing the two measures exactly how much data permissions hid.
 //
-// The worker is never handed paths to read: it only reports its own scan, so
-// elevating it cannot be used to probe arbitrary locations.
+// The worker receives only the scan configuration explicitly selected by the
+// user: root, scope, includes, excludes, and pruning.
 
 use crate::coverage::CoverageReport;
 use crate::fxhash::{FxHashSet, hash_path_bytes};
@@ -51,12 +51,13 @@ fn unescape(s: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(s.len());
     let mut i = 0;
     while i < s.len() {
-        if s[i] == b'%' && i + 2 < s.len() {
-            if let Ok(h) = u8::from_str_radix(&String::from_utf8_lossy(&s[i + 1..i + 3]), 16) {
-                out.push(h);
-                i += 3;
-                continue;
-            }
+        if s[i] == b'%'
+            && i + 2 < s.len()
+            && let Ok(h) = u8::from_str_radix(&String::from_utf8_lossy(&s[i + 1..i + 3]), 16)
+        {
+            out.push(h);
+            i += 3;
+            continue;
         }
         out.push(s[i]);
         i += 1;
@@ -154,7 +155,9 @@ pub fn compare(
     PermissionImpact {
         unprivileged_bytes: unpriv.totals.allocated_bytes,
         privileged_bytes: worker.walked_bytes,
-        hidden_bytes: worker.walked_bytes.saturating_sub(unpriv.totals.allocated_bytes),
+        hidden_bytes: worker
+            .walked_bytes
+            .saturating_sub(unpriv.totals.allocated_bytes),
         hidden_entries: worker.entries.saturating_sub(unpriv.totals.counts.entries),
         unprivileged_coverage: cov.coverage_percent,
         privileged_coverage: if cov.subtree {
@@ -199,7 +202,9 @@ mod tests {
     #[test]
     fn worker_report_roundtrip_with_awkward_paths() {
         let mut data = Vec::new();
-        data.extend_from_slice(b"rootwatch-worker 1\nwalked_bytes 100\nentries 7\nerrors 1\ndenied 2\n");
+        data.extend_from_slice(
+            b"rootwatch-worker 1\nwalked_bytes 100\nentries 7\nerrors 1\ndenied 2\n",
+        );
         data.extend_from_slice(b"dir 50 /a%20b/c%25d\ndir 5 /x\nend\n");
         let s = parse_worker_report(&data).unwrap();
         assert_eq!(s.walked_bytes, 100);

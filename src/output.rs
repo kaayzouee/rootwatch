@@ -9,6 +9,7 @@ use crate::model::*;
 use crate::nix::GcEstimate;
 use crate::privilege::PermissionImpact;
 use crate::temp::age_days;
+use crate::terminal;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
@@ -36,7 +37,10 @@ pub fn format_percent(part: u64, whole: u64) -> String {
 
 macro_rules! p {
     ($o:expr) => { { let _ = writeln!($o); } };
-    ($o:expr, $($a:tt)*) => { { let _ = writeln!($o, $($a)*); } };
+    ($o:expr, $($a:tt)*) => {{
+        let line = terminal::safe_text(&format!($($a)*));
+        let _ = writeln!($o, "{line}");
+    }};
 }
 
 fn age_label(days: Option<u64>) -> String {
@@ -97,19 +101,34 @@ pub fn render_report(
 
     p!(o, "scan");
     p!(o, "  entries:            {}", result.totals.counts.entries);
-    p!(o, "  regular files:      {}", result.totals.counts.regular_files);
-    p!(o, "  directories:        {}", result.totals.counts.directories);
+    p!(
+        o,
+        "  regular files:      {}",
+        result.totals.counts.regular_files
+    );
+    p!(
+        o,
+        "  directories:        {}",
+        result.totals.counts.directories
+    );
     p!(o, "  symlinks:           {}", result.totals.counts.symlinks);
     p!(o, "  other:              {}", result.totals.counts.other);
     p!(o, "  inaccessible/errors: {}", result.totals.counts.errors);
-    p!(o, "  walked allocation:  {}", format_bytes(result.totals.allocated_bytes));
+    p!(
+        o,
+        "  walked allocation:  {}",
+        format_bytes(result.totals.allocated_bytes)
+    );
     p!(o, "  elapsed:            {:.2}s", elapsed.as_secs_f64());
     p!(o);
 
     // ---- coverage ----
     p!(o, "coverage");
     if cov.subtree {
-        p!(o, "  subtree scan: whole-filesystem coverage is not applicable");
+        p!(
+            o,
+            "  subtree scan: whole-filesystem coverage is not applicable"
+        );
     } else {
         p!(
             o,
@@ -212,7 +231,11 @@ pub fn render_report(
     }
     for id in result.top_level_directories().into_iter().take(top) {
         let n = result.index.node(id);
-        let tag = if n.flags & flags::SKIPPED_MOUNT != 0 { "  (mount, not scanned)" } else { "" };
+        let tag = if n.flags & flags::SKIPPED_MOUNT != 0 {
+            "  (mount, not scanned)"
+        } else {
+            ""
+        };
         p!(
             o,
             "  {:>12}  {:>7}  {}{}",
@@ -224,11 +247,15 @@ pub fn render_report(
     }
     p!(o, "  (percent of walked allocation)");
     p!(o);
-    p!(o, "largest directories{}", match rel {
-        Reliability::Reliable => "",
-        Reliability::Provisional => "  [PROVISIONAL]",
-        Reliability::Unreliable => "  [UNRELIABLE]",
-    });
+    p!(
+        o,
+        "largest directories{}",
+        match rel {
+            Reliability::Reliable => "",
+            Reliability::Provisional => "  [PROVISIONAL]",
+            Reliability::Unreliable => "  [UNRELIABLE]",
+        }
+    );
     if let Some(c) = &caveat {
         p!(o, "  !! {c}");
     }
@@ -256,7 +283,12 @@ pub fn render_report(
             cov.coverage_percent
         ),
     };
-    p!(o, "  overall severity:   {}{}", analysis.overall.severity.label(), qual);
+    p!(
+        o,
+        "  overall severity:   {}{}",
+        analysis.overall.severity.label(),
+        qual
+    );
     p!(
         o,
         "  risk score:         {:.0}/100 ({})",
@@ -264,7 +296,13 @@ pub fn render_report(
         analysis.risk.level.label()
     );
     for c in analysis.risk.components.iter().filter(|c| c.value > 0.0) {
-        p!(o, "    {:<15} {:>4.0}%  {}", c.name, c.value * 100.0, c.detail);
+        p!(
+            o,
+            "    {:<15} {:>4.0}%  {}",
+            c.name,
+            c.value * 100.0,
+            c.detail
+        );
     }
     for ps in &analysis.pool_scores {
         p!(
@@ -315,7 +353,11 @@ pub fn render_report(
         }
     }
     if analysis.findings.len() > FINDING_LIMIT {
-        p!(o, "  ... {} more findings", analysis.findings.len() - FINDING_LIMIT);
+        p!(
+            o,
+            "  ... {} more findings",
+            analysis.findings.len() - FINDING_LIMIT
+        );
     }
     p!(o);
 
@@ -344,7 +386,13 @@ pub fn render_report(
             );
             p!(o, "      by age: {}", age_line(&t.age, t.bytes));
             for ow in t.owners.iter().take(3) {
-                p!(o, "      owner {:<12} {:>12} ({:.0}%)", ow.name, format_bytes(ow.bytes), ow.percent);
+                p!(
+                    o,
+                    "      owner {:<12} {:>12} ({:.0}%)",
+                    ow.name,
+                    format_bytes(ow.bytes),
+                    ow.percent
+                );
             }
             for c in t.top_children.iter().take(5) {
                 p!(
@@ -389,7 +437,12 @@ pub fn render_report(
                 format_bytes(b.stale_bytes)
             );
             for (path, bytes) in b.top_children.iter().take(2) {
-                p!(o, "          {:>12}  {}", format_bytes(*bytes), path.display());
+                p!(
+                    o,
+                    "          {:>12}  {}",
+                    format_bytes(*bytes),
+                    path.display()
+                );
             }
         }
         if !h.projects.is_empty() {
@@ -423,7 +476,12 @@ pub fn render_report(
             }
         }
         for f in h.large_files.iter().take(3) {
-            p!(o, "      large file {:>12}  {}", format_bytes(f.allocated_bytes), f.path.display());
+            p!(
+                o,
+                "      large file {:>12}  {}",
+                format_bytes(f.allocated_bytes),
+                f.path.display()
+            );
         }
         p!(o);
     }
@@ -435,16 +493,36 @@ pub fn render_report(
             p!(o, "  - {line}");
         }
         if let Some(db) = n.db_bytes {
-            p!(o, "  database: {}  profiles: {}", format_bytes(db), format_bytes(n.profiles_bytes.unwrap_or(0)));
+            p!(
+                o,
+                "  database: {}  profiles: {}",
+                format_bytes(db),
+                format_bytes(n.profiles_bytes.unwrap_or(0))
+            );
         }
         if !n.top_packages.is_empty() {
             p!(o, "  largest packages (all versions):");
             for pk in n.top_packages.iter().take(5) {
-                p!(o, "    {:>12}  {} ({} path{})", format_bytes(pk.bytes), pk.name, pk.versions, if pk.versions == 1 { "" } else { "s" });
+                p!(
+                    o,
+                    "    {:>12}  {} ({} path{})",
+                    format_bytes(pk.bytes),
+                    pk.name,
+                    pk.versions,
+                    if pk.versions == 1 { "" } else { "s" }
+                );
             }
         }
-        if let GcEstimate::Estimated { measured_paths, dead_paths, .. } = n.gc {
-            p!(o, "  gc estimate sized {measured_paths} of {dead_paths} dead paths");
+        if let GcEstimate::Estimated {
+            measured_paths,
+            dead_paths,
+            ..
+        } = n.gc
+        {
+            p!(
+                o,
+                "  gc estimate sized {measured_paths} of {dead_paths} dead paths"
+            );
         }
         for s in &n.suggestions {
             p!(o, "  note: {s}");
@@ -455,7 +533,13 @@ pub fn render_report(
     // ---- permission impact ----
     if let Some(pi) = opts.permission {
         p!(o, "permission impact");
-        let pct = |v: f64| if cov.subtree { "n/a".to_string() } else { format!("{v:.1}%") };
+        let pct = |v: f64| {
+            if cov.subtree {
+                "n/a".to_string()
+            } else {
+                format!("{v:.1}%")
+            }
+        };
         p!(
             o,
             "  unprivileged walked {} (coverage {}), privileged walked {} (coverage {})",
@@ -475,7 +559,11 @@ pub fn render_report(
             p!(o, "    {:>12}  {}", format_bytes(*bytes), path.display());
         }
         if pi.denied_dirs_not_listed > 0 {
-            p!(o, "    ... {} smaller denied path(s) not listed", pi.denied_dirs_not_listed);
+            p!(
+                o,
+                "    ... {} smaller denied path(s) not listed",
+                pi.denied_dirs_not_listed
+            );
         }
         p!(o);
     } else if let Some(e) = opts.permission_error {
@@ -500,7 +588,11 @@ pub fn render_report(
 
     p!(o, "scan issues");
     p!(o, "  total:              {}", result.issues.len());
-    p!(o, "  permission denied:  {}", result.permission_denied_count());
+    p!(
+        o,
+        "  permission denied:  {}",
+        result.permission_denied_count()
+    );
     for issue in result.issues.iter().take(ISSUE_LIMIT) {
         let label = match issue.kind {
             ScanIssueKind::PermissionDenied => "permission",
@@ -513,7 +605,10 @@ pub fn render_report(
     }
     if result.root == Path::new("/") {
         p!(o);
-        p!(o, "note: /proc, /sys, /dev and /run are excluded by default");
+        p!(
+            o,
+            "note: /proc, /sys, /dev and /run are excluded by default"
+        );
     }
     o
 }

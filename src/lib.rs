@@ -12,6 +12,8 @@ pub mod output;
 pub mod privilege;
 pub mod scanner;
 pub mod temp;
+pub mod terminal;
 pub mod topk;
+pub mod tui;
 pub mod users;
 pub mod zones;

@@ -13,9 +13,12 @@ use crate::fxhash::FxHashMap;
 use crate::model::*;
 use crate::topk::TopK;
 use std::io::Read;
-use std::path::Path;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use std::{env, fs};
 
 #[derive(Debug, Clone)]
 pub enum DeadPaths {
@@ -123,8 +126,64 @@ pub fn query_dead_paths(timeout: Duration) -> DeadPaths {
     DeadPaths::Unavailable(last_err)
 }
 
+fn trusted_canonical_path(path: &Path, owner_uid: u32) -> Option<PathBuf> {
+    let canonical = fs::canonicalize(path).ok()?;
+    let mut cur = canonical.as_path();
+    loop {
+        let meta = fs::symlink_metadata(cur).ok()?;
+        if meta.uid() != owner_uid || meta.permissions().mode() & 0o022 != 0 {
+            return None;
+        }
+        let Some(parent) = cur.parent() else {
+            break;
+        };
+        if parent == cur {
+            break;
+        }
+        cur = parent;
+    }
+    Some(canonical)
+}
+
+fn find_trusted_program(
+    name: &str,
+    path: &std::ffi::OsStr,
+    owner_uid: u32,
+) -> Result<PathBuf, String> {
+    for dir in env::split_paths(path) {
+        if !dir.is_absolute() {
+            continue;
+        }
+        let Some(trusted_dir) = trusted_canonical_path(&dir, owner_uid) else {
+            continue;
+        };
+        let candidate = trusted_dir.join(name);
+        let Some(trusted) = trusted_canonical_path(&candidate, owner_uid) else {
+            continue;
+        };
+        let Ok(meta) = fs::symlink_metadata(&trusted) else {
+            continue;
+        };
+        let mode = meta.permissions().mode();
+        if meta.is_file() && mode & 0o111 != 0 {
+            return Ok(trusted);
+        }
+    }
+
+    Err(format!("no trusted {name} found on PATH"))
+}
+
+fn program_path(name: &str) -> Result<PathBuf, String> {
+    if !rustix::process::geteuid().is_root() {
+        return Ok(PathBuf::from(name));
+    }
+    let path = env::var_os("PATH").ok_or("PATH is unset")?;
+    find_trusted_program(name, &path, 0)
+}
+
 fn run_with_timeout(cmd: &str, args: &[&str], timeout: Duration) -> Result<Vec<u8>, String> {
-    let mut child = Command::new(cmd)
+    let program = program_path(cmd)?;
+    let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -179,29 +238,35 @@ fn read_generations(profiles: &Path) -> Vec<GenerationGroup> {
         let prefix = if dir == profiles {
             String::new()
         } else {
-            format!("{}/", dir.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()))
+            format!(
+                "{}/",
+                dir.file_name()
+                    .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+            )
         };
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         let entries: Vec<_> = rd.flatten().collect();
         for e in &entries {
             let fname = e.file_name().to_string_lossy().into_owned();
-            let Some((profile, num)) = parse_link(&fname) else { continue };
+            let Some((profile, num)) = parse_link(&fname) else {
+                continue;
+            };
             let key = format!("{prefix}{profile}");
-            let mtime = e
-                .path()
-                .symlink_metadata()
-                .ok()
-                .and_then(|m| {
-                    use std::os::unix::fs::MetadataExt;
-                    Some(m.mtime())
-                });
-            let g = groups.entry(key.clone()).or_insert_with(|| GenerationGroup {
-                profile: key.clone(),
-                count: 0,
-                current: None,
-                oldest_unix: None,
-                newest_unix: None,
+            let mtime = e.path().symlink_metadata().ok().map(|m| {
+                use std::os::unix::fs::MetadataExt;
+                m.mtime()
             });
+            let g = groups
+                .entry(key.clone())
+                .or_insert_with(|| GenerationGroup {
+                    profile: key.clone(),
+                    count: 0,
+                    current: None,
+                    oldest_unix: None,
+                    newest_unix: None,
+                });
             g.count += 1;
             if let Some(t) = mtime {
                 g.oldest_unix = Some(g.oldest_unix.map_or(t, |o| o.min(t)));
@@ -211,15 +276,17 @@ fn read_generations(profiles: &Path) -> Vec<GenerationGroup> {
         }
         // The un-numbered symlink points at the current generation.
         for (key, g) in groups.iter_mut() {
-            let bare = key.strip_prefix(&prefix).filter(|_| key.starts_with(&prefix));
+            let bare = key
+                .strip_prefix(&prefix)
+                .filter(|_| key.starts_with(&prefix));
             if let Some(bare) = bare {
                 if bare.contains('/') {
                     continue;
                 }
-                if let Ok(target) = std::fs::read_link(dir.join(bare)) {
-                    if let Some((_, n)) = parse_link(&target.to_string_lossy()) {
-                        g.current = Some(n);
-                    }
+                if let Ok(target) = std::fs::read_link(dir.join(bare))
+                    && let Some((_, n)) = parse_link(&target.to_string_lossy())
+                {
+                    g.current = Some(n);
                 }
             }
         }
@@ -246,7 +313,9 @@ pub fn build(result: &ScanResult, dead: Option<&DeadPaths>) -> Option<NixReport>
     for &id in &result.nix.store_entries {
         let b = result.index.node(id).usage.bytes;
         top.push((b, u64::from(id.0)), id);
-        let e = pkgs.entry(package_name(result.index.name(id))).or_insert((0, 0));
+        let e = pkgs
+            .entry(package_name(result.index.name(id)))
+            .or_insert((0, 0));
         e.0 += b;
         e.1 += 1;
     }
@@ -315,7 +384,10 @@ pub fn build(result: &ScanResult, dead: Option<&DeadPaths>) -> Option<NixReport>
         loose_files: zone.map_or(0, |z| z.loose_files),
         loose_bytes: zone.map_or(0, |z| z.loose_bytes),
         db_bytes: result.nix.db.map(|n| result.index.node(n).usage.bytes),
-        profiles_bytes: result.nix.profiles.map(|n| result.index.node(n).usage.bytes),
+        profiles_bytes: result
+            .nix
+            .profiles
+            .map(|n| result.index.node(n).usage.bytes),
         generations,
         top_paths,
         top_packages,
@@ -341,7 +413,11 @@ fn explain(r: &mut NixReport, now: i64) {
         r.percent_of_fs_used
     ));
     if let Some(top) = r.top_paths.first() {
-        ex.push(format!("largest single store path: {} ({})", top.name, gib(top.bytes)));
+        ex.push(format!(
+            "largest single store path: {} ({})",
+            top.name,
+            gib(top.bytes)
+        ));
     }
     if let Some(sys) = r.generations.iter().find(|g| g.profile == "system") {
         let age = sys
@@ -356,7 +432,12 @@ fn explain(r: &mut NixReport, now: i64) {
             sg.push("nix-collect-garbage --delete-older-than 30d  (drops old generations, then collects)".to_string());
         }
     }
-    let multi: Vec<&PackageUsage> = r.top_packages.iter().filter(|p| p.versions > 1).take(3).collect();
+    let multi: Vec<&PackageUsage> = r
+        .top_packages
+        .iter()
+        .filter(|p| p.versions > 1)
+        .take(3)
+        .collect();
     for p in &multi {
         ex.push(format!(
             "{} exists in {} versions/outputs totalling {}",
@@ -369,8 +450,15 @@ fn explain(r: &mut NixReport, now: i64) {
         GcEstimate::NotRequested => ex.push(
             "garbage-collectable size not measured; add --nix-gc for an exact estimate".to_string(),
         ),
-        GcEstimate::Unavailable(why) => ex.push(format!("garbage-collectable size unavailable ({why})")),
-        GcEstimate::Estimated { bytes, dead_paths, unmatched_paths, .. } => {
+        GcEstimate::Unavailable(why) => {
+            ex.push(format!("garbage-collectable size unavailable ({why})"))
+        }
+        GcEstimate::Estimated {
+            bytes,
+            dead_paths,
+            unmatched_paths,
+            ..
+        } => {
             let pct = *bytes as f64 / r.store_bytes.max(1) as f64 * 100.0;
             ex.push(format!(
                 "{} ({pct:.1}% of the store) is unreferenced and would be freed by a garbage collection ({dead_paths} paths{})",
@@ -387,12 +475,14 @@ fn explain(r: &mut NixReport, now: i64) {
             }
         }
     }
-    if let Some(db) = r.db_bytes {
-        if db > (1 << 30) {
-            ex.push(format!("the Nix database is {}", gib(db)));
-        }
+    if let Some(db) = r.db_bytes
+        && db > (1 << 30)
+    {
+        ex.push(format!("the Nix database is {}", gib(db)));
     }
-    sg.push("Rootwatch is read-only and never runs these; run them yourself if you agree".to_string());
+    sg.push(
+        "Rootwatch is read-only and never runs these; run them yourself if you agree".to_string(),
+    );
     r.explanation = ex;
     r.suggestions = sg;
 }
@@ -410,11 +500,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn trusted_program_ignores_writable_path_entries() {
+        let unsafe_dir = std::env::temp_dir().join(format!("rw-path-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&unsafe_dir);
+        std::fs::create_dir_all(&unsafe_dir).unwrap();
+        std::fs::set_permissions(&unsafe_dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let program_name = "rootwatch-path-trust-test";
+        let fake = unsafe_dir.join(program_name);
+        std::fs::write(&fake, b"not really executable code").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let path = std::env::join_paths([unsafe_dir.as_path()]).unwrap();
+        assert!(find_trusted_program(program_name, &path, 0).is_err());
+
+        let _ = std::fs::remove_dir_all(&unsafe_dir);
+    }
+
+    #[test]
+    fn trusted_program_rejects_writable_path_directories() {
+        assert!(find_trusted_program("sh", std::ffi::OsStr::new("/tmp"), 0).is_err());
+        assert!(find_trusted_program("sh", std::ffi::OsStr::new("."), 0).is_err());
+    }
+
+    #[test]
     fn package_names_drop_hash_and_version() {
         let h = "a".repeat(32);
         let n = |s: &str| format!("{h}-{s}");
         assert_eq!(package_name(n("glibc-2.39-52").as_bytes()), b"glibc");
-        assert_eq!(package_name(n("python3.12-numpy-1.26.4").as_bytes()), b"python3.12-numpy");
+        assert_eq!(
+            package_name(n("python3.12-numpy-1.26.4").as_bytes()),
+            b"python3.12-numpy"
+        );
         assert_eq!(package_name(n("linux-6.6.30-modules").as_bytes()), b"linux");
         assert_eq!(package_name(n("source").as_bytes()), b"source");
     }
@@ -425,7 +541,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for n in [1, 2, 3] {
-            std::os::unix::fs::symlink("/nix/store/x", dir.join(format!("system-{n}-link"))).unwrap();
+            std::os::unix::fs::symlink("/nix/store/x", dir.join(format!("system-{n}-link")))
+                .unwrap();
         }
         std::os::unix::fs::symlink("system-3-link", dir.join("system")).unwrap();
         let g = read_generations(&dir);

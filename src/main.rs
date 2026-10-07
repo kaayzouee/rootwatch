@@ -28,6 +28,10 @@ fn run() -> Result<(), String> {
         return Err(format!("scan root is not a directory: {}", root.display()));
     }
 
+    if cli.tui {
+        return rootwatch::tui::run(&cli, root).map_err(|e| e.to_string());
+    }
+
     let config = cli.scan_config();
     let started = Instant::now();
     let result = scan(&root, &config).map_err(|e| format!("scan failed: {e}"))?;
@@ -50,7 +54,10 @@ fn run() -> Result<(), String> {
 
     let (impact, impact_err) = if cli.privileged && !privilege::is_root() {
         match privilege::run_privileged_worker(&cli.elevate, &cli.worker_args(&root)) {
-            Ok(w) => (Some(privilege::compare(&result, &analysis.coverage, &w)), None),
+            Ok(w) => (
+                Some(privilege::compare(&result, &analysis.coverage, &w)),
+                None,
+            ),
             Err(e) => (None, Some(e)),
         }
     } else {

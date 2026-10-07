@@ -20,7 +20,10 @@ impl Fixture {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         let root = fs::canonicalize(&root).unwrap();
-        Self { root, mounts: Vec::new() }
+        Self {
+            root,
+            mounts: Vec::new(),
+        }
     }
 
     pub fn path(&self, rel: &str) -> PathBuf {
@@ -42,8 +45,14 @@ impl Fixture {
 
     pub fn set_age_days(&self, rel: &str, days: i64, now: i64) {
         use rustix::fs::{AtFlags, CWD, Timespec, Timestamps, utimensat};
-        let t = Timespec { tv_sec: now - days * 86_400, tv_nsec: 0 };
-        let ts = Timestamps { last_access: t, last_modification: t };
+        let t = Timespec {
+            tv_sec: now - days * 86_400,
+            tv_nsec: 0,
+        };
+        let ts = Timestamps {
+            last_access: t,
+            last_modification: t,
+        };
         utimensat(CWD, self.path(rel), &ts, AtFlags::SYMLINK_NOFOLLOW).unwrap();
     }
 
@@ -91,18 +100,20 @@ impl Drop for Fixture {
 /// bytes with hard-link dedup, not following symlinks, staying on one device.
 pub fn reference_bytes(root: &Path) -> u64 {
     fn walk(p: &Path, seen: &mut HashSet<(u64, u64)>, dev: u64, total: &mut u64) {
-        let Ok(md) = fs::symlink_metadata(p) else { return };
+        let Ok(md) = fs::symlink_metadata(p) else {
+            return;
+        };
         if md.dev() != dev {
             return;
         }
         if md.nlink() <= 1 || md.is_dir() || seen.insert((md.dev(), md.ino())) {
             *total += md.blocks() * 512;
         }
-        if md.is_dir() {
-            if let Ok(rd) = fs::read_dir(p) {
-                for e in rd.flatten() {
-                    walk(&e.path(), seen, dev, total);
-                }
+        if md.is_dir()
+            && let Ok(rd) = fs::read_dir(p)
+        {
+            for e in rd.flatten() {
+                walk(&e.path(), seen, dev, total);
             }
         }
     }

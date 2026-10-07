@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-only
+//  Copyright (C) 2026 kaayzouee
+// Author: https://github.com/kaayzouee
 mod common;
 
 use common::*;
@@ -10,7 +13,10 @@ use std::os::unix::fs::symlink;
 const NOW: i64 = 1_800_000_000;
 
 fn cfg() -> ScanConfig {
-    ScanConfig { now_unix: Some(NOW), ..ScanConfig::default() }
+    ScanConfig {
+        now_unix: Some(NOW),
+        ..ScanConfig::default()
+    }
 }
 
 fn find(r: &ScanResult, path: &std::path::Path) -> NodeId {
@@ -39,7 +45,17 @@ fn hard_links_are_counted_once() {
     let fx = Fixture::new("hl");
     let f = fx.file("x/orig.bin", 200_000);
     fs::hard_link(&f, fx.path("x/link1.bin")).unwrap();
-    fs::hard_link(&f, fx.path("y/link2.bin").parent().map(|p| { fs::create_dir_all(p).unwrap(); fx.path("y/link2.bin") }).unwrap()).unwrap();
+    fs::hard_link(
+        &f,
+        fx.path("y/link2.bin")
+            .parent()
+            .map(|p| {
+                fs::create_dir_all(p).unwrap();
+                fx.path("y/link2.bin")
+            })
+            .unwrap(),
+    )
+    .unwrap();
     let single = fx.file("z/lone.bin", 200_000);
     let r = scan(&fx.root, &cfg()).unwrap();
     assert_eq!(r.totals.allocated_bytes, reference_bytes(&fx.root));
@@ -74,8 +90,16 @@ fn sparse_files_count_allocation_not_apparent_size() {
     f.set_len(512 << 20).unwrap();
     drop(f);
     let r = scan(&fx.root, &cfg()).unwrap();
-    assert!(r.totals.allocated_bytes < 1 << 20, "got {}", r.totals.allocated_bytes);
-    assert_eq!(r.top_files.len(), 0, "a hole-only file has no allocated bytes to rank");
+    assert!(
+        r.totals.allocated_bytes < 1 << 20,
+        "got {}",
+        r.totals.allocated_bytes
+    );
+    assert_eq!(
+        r.top_files.len(),
+        0,
+        "a hole-only file has no allocated bytes to rank"
+    );
 }
 
 #[test]
@@ -88,7 +112,11 @@ fn aggregation_is_consistent_and_children_iterate() {
     for id in r.index.ids() {
         let n = r.index.node(id);
         let kids: u64 = r.index.children(id).map(|c| r.usage(c).bytes).sum();
-        assert!(n.usage.bytes >= kids, "parent smaller than children at {}", r.index.path(id).display());
+        assert!(
+            n.usage.bytes >= kids,
+            "parent smaller than children at {}",
+            r.index.path(id).display()
+        );
         for c in r.index.children(id) {
             assert_eq!(r.index.node(c).parent, id);
             assert!(c > id, "children must have larger ids than parents");
@@ -109,7 +137,18 @@ fn top_level_and_largest_rankings_are_ordered() {
     fx.file("mid/f", 300_000);
     fx.file("small/f", 10_000);
     let r = scan(&fx.root, &cfg()).unwrap();
-    let tl: Vec<_> = r.top_level_directories().iter().map(|&i| r.index.path(i).file_name().unwrap().to_string_lossy().into_owned()).collect();
+    let tl: Vec<_> = r
+        .top_level_directories()
+        .iter()
+        .map(|&i| {
+            r.index
+                .path(i)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
     assert_eq!(tl, ["big", "mid", "small"]);
     let lg = r.largest_directories(2);
     assert_eq!(lg.len(), 2);
@@ -145,7 +184,11 @@ fn age_buckets_follow_mtime() {
     assert!(a[0] >= 100_000, "{a:?}");
     assert!(a[1] >= 100_000, "{a:?}");
     assert!(a[4] >= 100_000, "{a:?}");
-    assert_eq!(a.iter().sum::<u64>(), r.totals.allocated_bytes, "age buckets partition the bytes");
+    assert_eq!(
+        a.iter().sum::<u64>(),
+        r.totals.allocated_bytes,
+        "age buckets partition the bytes"
+    );
     assert_eq!(age_bucket(200 * 86_400), 4);
     assert_eq!(bucket_from_days(7), 2);
 }
@@ -158,7 +201,11 @@ fn temp_zone_collects_owners_age_and_top_files() {
     fx.set_age_days("t/a/big.bin", 40, NOW);
     let mut c = cfg();
     c.zones = ZoneConfig {
-        rules: vec![ZoneRule::zone(fx.path("t").to_str().unwrap(), PathClass::Temporary, Role::TempZone)],
+        rules: vec![ZoneRule::zone(
+            fx.path("t").to_str().unwrap(),
+            PathClass::Temporary,
+            Role::TempZone,
+        )],
         excluded: vec![],
     };
     let r = scan(&fx.root, &c).unwrap();
@@ -169,7 +216,11 @@ fn temp_zone_collects_owners_age_and_top_files() {
     assert_eq!(z.top_files[0].path, fx.path("t/a/big.bin"));
     assert_eq!(z.loose_files, 1);
     let t = find(&r, &fx.path("t/a"));
-    assert_eq!(r.index.node(t).class, PathClass::Temporary, "class is inherited by descendants");
+    assert_eq!(
+        r.index.node(t).class,
+        PathClass::Temporary,
+        "class is inherited by descendants"
+    );
 }
 
 #[test]
@@ -185,19 +236,38 @@ fn home_zone_buckets_projects_and_artifacts() {
     fx.file("h/kay/notes.txt", 4_000);
     let mut c = cfg();
     c.zones = ZoneConfig {
-        rules: vec![ZoneRule::zone(&format!("{}/h/*", fx.root.display()), PathClass::Home, Role::HomeZone)],
+        rules: vec![ZoneRule::zone(
+            &format!("{}/h/*", fx.root.display()),
+            PathClass::Home,
+            Role::HomeZone,
+        )],
         excluded: vec![],
     };
     let r = scan(&fx.root, &c).unwrap();
     let mut buckets: Vec<_> = r.home_buckets.iter().map(|b| b.bucket.label()).collect();
     buckets.sort();
-    assert_eq!(buckets, [".cache", ".cargo", "Downloads", "other (projects, documents)"]);
-    assert_eq!(r.projects.len(), 1, "nested project must not be double counted");
+    assert_eq!(
+        buckets,
+        [
+            ".cache",
+            ".cargo",
+            "Downloads",
+            "other (projects, documents)"
+        ]
+    );
+    assert_eq!(
+        r.projects.len(),
+        1,
+        "nested project must not be double counted"
+    );
     assert_eq!(r.index.path(r.projects[0].node), fx.path("h/kay/code/proj"));
     assert_eq!(r.artifacts.len(), 1);
     assert_eq!(r.index.name(r.artifacts[0].node), b"target");
     assert!(r.usage(r.artifacts[0].node).bytes >= 700_000);
-    assert_eq!(r.zones[0].loose_files, 1, "notes.txt sits directly in the home dir");
+    assert_eq!(
+        r.zones[0].loose_files, 1,
+        "notes.txt sits directly in the home dir"
+    );
 
     // the analysis layer turns that into a report
     let a = rootwatch::analysis::analyze(&r, &Default::default());
@@ -222,7 +292,11 @@ fn nix_store_entries_packages_and_gc_estimate() {
     fx.file(&format!("n/store/{}-foo.drv", h('d')), 2_000);
     fx.dir("n/var/nix/profiles");
     for g in 1..=3 {
-        symlink("/nix/store/x", fx.path(&format!("n/var/nix/profiles/system-{g}-link"))).unwrap();
+        symlink(
+            "/nix/store/x",
+            fx.path(&format!("n/var/nix/profiles/system-{g}-link")),
+        )
+        .unwrap();
     }
     symlink("system-3-link", fx.path("n/var/nix/profiles/system")).unwrap();
     fx.dir("n/var/nix/db");
@@ -241,7 +315,14 @@ fn nix_store_entries_packages_and_gc_estimate() {
     let r = scan(&fx.root, &c).unwrap();
     assert_eq!(r.nix.store_entries.len(), 3);
     assert!(r.nix.profiles.is_some() && r.nix.db.is_some());
-    assert_eq!(r.zones.iter().find(|z| z.role == Role::NixStore).unwrap().loose_files, 1);
+    assert_eq!(
+        r.zones
+            .iter()
+            .find(|z| z.role == Role::NixStore)
+            .unwrap()
+            .loose_files,
+        1
+    );
 
     let dead = DeadPaths::Found(vec![
         format!("/nix/store/{}", names[0]).into_bytes(),
@@ -254,13 +335,22 @@ fn nix_store_entries_packages_and_gc_estimate() {
     assert_eq!(rep.generations[0].count, 3);
     assert_eq!(rep.generations[0].current, Some(3));
     match rep.gc {
-        GcEstimate::Estimated { dead_paths, measured_paths, unmatched_paths, bytes } => {
+        GcEstimate::Estimated {
+            dead_paths,
+            measured_paths,
+            unmatched_paths,
+            bytes,
+        } => {
             assert_eq!((dead_paths, measured_paths, unmatched_paths), (2, 1, 1));
             assert!(bytes >= 300_000);
         }
         other => panic!("{other:?}"),
     }
-    assert!(rep.explanation.iter().any(|l| l.contains("system generation")));
+    assert!(
+        rep.explanation
+            .iter()
+            .any(|l| l.contains("system generation"))
+    );
 }
 
 #[test]
@@ -282,37 +372,67 @@ fn unreadable_directories_are_recorded_and_scanning_continues() {
     assert!(r.index.node(n).has_flag(flags::DENIED));
     assert_eq!(r.usage(n).counts.errors, 1);
     assert_eq!(r.totals.counts.errors, 1, "error is aggregated to the root");
-    assert_eq!(r.totals.counts.regular_files, 1, "the open sibling was still scanned");
+    assert_eq!(
+        r.totals.counts.regular_files, 1,
+        "the open sibling was still scanned"
+    );
     let a = rootwatch::analysis::analyze(&r, &Default::default());
     assert_eq!(a.coverage.denied_dirs, 1);
-    assert!(a.coverage.gaps.iter().any(|g| matches!(g.kind, rootwatch::coverage::GapKind::PermissionDenied)));
+    assert!(
+        a.coverage
+            .gaps
+            .iter()
+            .any(|g| matches!(g.kind, rootwatch::coverage::GapKind::PermissionDenied))
+    );
 }
 
 // ---------------- multi-filesystem behaviour (needs root + mount) ----------------
 
 #[test]
 fn scope_root_reports_but_does_not_enter_tmpfs() {
-    if !is_root() { eprintln!("SKIP: needs root"); return; }
+    if !is_root() {
+        eprintln!("SKIP: needs root");
+        return;
+    }
     let mut fx = Fixture::new("scoperoot");
     fx.file("plain/f", 10_000);
-    if !fx.mount_tmpfs("mnt") { eprintln!("SKIP: cannot mount"); return; }
+    if !fx.mount_tmpfs("mnt") {
+        eprintln!("SKIP: cannot mount");
+        return;
+    }
     fs::write(fx.path("mnt/inside"), vec![1u8; 1_000_000]).unwrap();
     let r = scan(&fx.root, &cfg()).unwrap();
     assert_eq!(r.filesystems.len(), 1);
-    let b = r.mount_boundaries.iter().find(|b| b.path == fx.path("mnt")).expect("boundary reported");
-    assert_eq!(b.decision, BoundaryDecision::Skipped(SkipReason::OutOfScope));
+    let b = r
+        .mount_boundaries
+        .iter()
+        .find(|b| b.path == fx.path("mnt"))
+        .expect("boundary reported");
+    assert_eq!(
+        b.decision,
+        BoundaryDecision::Skipped(SkipReason::OutOfScope)
+    );
     assert_eq!(b.fstype, "tmpfs");
-    assert!(r.totals.allocated_bytes < 500_000, "tmpfs content must not leak into a root-scope scan");
+    assert!(
+        r.totals.allocated_bytes < 500_000,
+        "tmpfs content must not leak into a root-scope scan"
+    );
     let n = find(&r, &fx.path("mnt"));
     assert!(r.index.node(n).has_flag(flags::SKIPPED_MOUNT));
 }
 
 #[test]
 fn scope_all_enters_tmpfs_and_aggregates_per_filesystem() {
-    if !is_root() { eprintln!("SKIP: needs root"); return; }
+    if !is_root() {
+        eprintln!("SKIP: needs root");
+        return;
+    }
     let mut fx = Fixture::new("scopeall");
     fx.file("plain/f", 10_000);
-    if !fx.mount_tmpfs("mnt") { eprintln!("SKIP: cannot mount"); return; }
+    if !fx.mount_tmpfs("mnt") {
+        eprintln!("SKIP: cannot mount");
+        return;
+    }
     fs::write(fx.path("mnt/inside"), vec![1u8; 1_000_000]).unwrap();
     let mut c = cfg();
     c.scope = ScanScope::All;
@@ -328,20 +448,34 @@ fn scope_all_enters_tmpfs_and_aggregates_per_filesystem() {
     let root = r.usage(r.root_node());
     assert!(root.bytes >= root.fs_bytes + 1_000_000);
     assert_eq!(root.fs_bytes, r.filesystems[0].walked_bytes);
-    assert_eq!(r.totals.allocated_bytes, r.filesystems.iter().map(|f| f.walked_bytes).sum::<u64>());
+    assert_eq!(
+        r.totals.allocated_bytes,
+        r.filesystems.iter().map(|f| f.walked_bytes).sum::<u64>()
+    );
 }
 
 #[test]
 fn selected_scope_enters_only_included_mounts() {
-    if !is_root() { eprintln!("SKIP: needs root"); return; }
+    if !is_root() {
+        eprintln!("SKIP: needs root");
+        return;
+    }
     let mut fx = Fixture::new("select");
-    if !fx.mount_tmpfs("one") || !fx.mount_tmpfs("two") { eprintln!("SKIP: cannot mount"); return; }
+    if !fx.mount_tmpfs("one") || !fx.mount_tmpfs("two") {
+        eprintln!("SKIP: cannot mount");
+        return;
+    }
     let mut c = cfg();
     c.scope = ScanScope::Selected;
     c.include.push(fx.path("one"));
     let r = scan(&fx.root, &c).unwrap();
     assert_eq!(r.filesystems.len(), 2);
-    let entered: Vec<_> = r.mount_boundaries.iter().filter(|b| b.decision == BoundaryDecision::Entered).map(|b| b.path.clone()).collect();
+    let entered: Vec<_> = r
+        .mount_boundaries
+        .iter()
+        .filter(|b| b.decision == BoundaryDecision::Entered)
+        .map(|b| b.path.clone())
+        .collect();
     assert_eq!(entered, vec![fx.path("one")]);
     assert!(r.unreached_includes.is_empty());
 
@@ -355,33 +489,74 @@ fn selected_scope_enters_only_included_mounts() {
 
 #[test]
 fn bind_mount_of_scanned_content_is_not_double_counted() {
-    if !is_root() { eprintln!("SKIP: needs root"); return; }
+    if !is_root() {
+        eprintln!("SKIP: needs root");
+        return;
+    }
     let mut fx = Fixture::new("bind");
-    if !fx.mount_tmpfs("fs") { eprintln!("SKIP: cannot mount"); return; }
+    if !fx.mount_tmpfs("fs") {
+        eprintln!("SKIP: cannot mount");
+        return;
+    }
     fs::write(fx.path("fs/data"), vec![1u8; 2_000_000]).unwrap();
     let src = fx.path("fs");
-    if !fx.bind_mount(&src, "alias") { eprintln!("SKIP: cannot bind"); return; }
+    if !fx.bind_mount(&src, "alias") {
+        eprintln!("SKIP: cannot bind");
+        return;
+    }
     let mut c = cfg();
     c.scope = ScanScope::All;
     let r = scan(&fx.root, &c).unwrap();
-    let data_copies = r.top_files.iter().filter(|f| f.allocated_bytes >= 2_000_000).count();
-    assert_eq!(data_copies, 1, "the same tmpfs content is reachable twice but counted once");
-    assert!(r.mount_boundaries.iter().any(|b| b.decision == BoundaryDecision::Skipped(SkipReason::DuplicateBind)));
+    let data_copies = r
+        .top_files
+        .iter()
+        .filter(|f| f.allocated_bytes >= 2_000_000)
+        .count();
+    assert_eq!(
+        data_copies, 1,
+        "the same tmpfs content is reachable twice but counted once"
+    );
+    assert!(
+        r.mount_boundaries
+            .iter()
+            .any(|b| b.decision == BoundaryDecision::Skipped(SkipReason::DuplicateBind))
+    );
 }
 
 #[test]
 fn self_bind_mount_is_traversed_like_nixos_nix_store() {
-    if !is_root() { eprintln!("SKIP: needs root"); return; }
+    if !is_root() {
+        eprintln!("SKIP: needs root");
+        return;
+    }
     let fx = Fixture::new("selfbind");
     fx.file("store/pkg/file", 700_000);
     let store = fx.path("store");
-    let ok = std::process::Command::new("mount").arg("--bind").arg(&store).arg(&store).status().map(|s| s.success()).unwrap_or(false);
-    if !ok { eprintln!("SKIP: cannot bind"); return; }
+    let ok = std::process::Command::new("mount")
+        .arg("--bind")
+        .arg(&store)
+        .arg(&store)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        eprintln!("SKIP: cannot bind");
+        return;
+    }
     let r = scan(&fx.root, &cfg());
     let _ = std::process::Command::new("umount").arg(&store).status();
     let r = r.unwrap();
-    assert!(r.top_files.iter().any(|f| f.path.ends_with("store/pkg/file")), "content under a self bind must still be scanned");
-    assert_eq!(r.filesystems.len(), 1, "a self bind is not a new filesystem");
+    assert!(
+        r.top_files
+            .iter()
+            .any(|f| f.path.ends_with("store/pkg/file")),
+        "content under a self bind must still be scanned"
+    );
+    assert_eq!(
+        r.filesystems.len(),
+        1,
+        "a self bind is not a new filesystem"
+    );
     assert!(r.totals.allocated_bytes >= 700_000);
 }
 
@@ -389,5 +564,8 @@ fn self_bind_mount_is_traversed_like_nixos_nix_store() {
 fn pseudo_prune_defaults_leave_other_dirs_alone() {
     let r = scan(std::path::Path::new("/etc"), &cfg()).unwrap();
     assert!(r.totals.counts.entries > 10);
-    assert_eq!(r.totals.allocated_bytes, reference_bytes(std::path::Path::new("/etc")));
+    assert_eq!(
+        r.totals.allocated_bytes,
+        reference_bytes(std::path::Path::new("/etc"))
+    );
 }
