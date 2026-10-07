@@ -34,8 +34,8 @@ use crate::nix::{self, DeadPaths, NixReport};
 use crate::temp::{self, TempAssessment, TempReport};
 use crate::topk::TopK;
 use crate::users::UserNames;
-pub use crate::zones::PathClass;
 use crate::zones::HomeBucket;
+pub use crate::zones::PathClass;
 use std::path::PathBuf;
 
 const MIB: u64 = 1 << 20;
@@ -474,10 +474,11 @@ impl<'a> Engine<'a> {
 
     fn expectation(&self, n: &DirNode, stale: f64, growth: &Option<Growth>) -> Expectation {
         let bytes = n.usage.bytes;
-        if let Some(g) = growth {
-            if g.percent.is_none_or(|p| p >= 100.0) && g.bonus >= 10.0 {
-                return Expectation::Suspicious;
-            }
+        if let Some(g) = growth
+            && g.percent.is_none_or(|p| p >= 100.0)
+            && g.bonus >= 10.0
+        {
+            return Expectation::Suspicious;
         }
         match n.class {
             PathClass::System | PathClass::Nix => Expectation::Expected,
@@ -524,7 +525,11 @@ impl<'a> Engine<'a> {
 
     fn confidence_of(&self, n: &DirNode) -> ScanConfidence {
         let c = self.pool_conf[self.pool_of(n)];
-        if n.usage.counts.errors > 0 { c.downgrade() } else { c }
+        if n.usage.counts.errors > 0 {
+            c.downgrade()
+        } else {
+            c
+        }
     }
 
     fn reasons(&self, id: NodeId, n: &DirNode, s: &Scored, severity: Severity) -> Vec<String> {
@@ -545,7 +550,10 @@ impl<'a> Engine<'a> {
             ));
         }
         if severity >= Severity::High {
-            r.push(format!("weighted storage pressure is {}", severity.label().to_lowercase()));
+            r.push(format!(
+                "weighted storage pressure is {}",
+                severity.label().to_lowercase()
+            ));
         }
         match s.expectation {
             Expectation::Suspicious => r.push("classified suspicious".to_string()),
@@ -583,7 +591,10 @@ impl<'a> Engine<'a> {
             r.push("directory unreadable (permission denied): contents not counted".to_string());
         }
         if n.usage.counts.errors > 0 {
-            r.push(format!("{} inaccessible/error entries below path", n.usage.counts.errors));
+            r.push(format!(
+                "{} inaccessible/error entries below path",
+                n.usage.counts.errors
+            ));
         }
         let conf = self.confidence_of(n);
         if conf != ScanConfidence::High {
@@ -641,10 +652,7 @@ impl<'a> Engine<'a> {
         let s = self.score_bytes(n, bytes, 0.0, expectation, None);
         let severity = self.cfg.severity(s.score);
         let conf = self.confidence_of(n);
-        reasons.push(format!(
-            "{:.1}% of filesystem used space",
-            s.share_pct
-        ));
+        reasons.push(format!("{:.1}% of filesystem used space", s.share_pct));
         if conf != ScanConfidence::High {
             reasons.push(format!("scan confidence {}", conf.label()));
         }
@@ -678,7 +686,11 @@ pub fn fmt_bytes(bytes: u64) -> String {
         v /= 1024.0;
         u += 1;
     }
-    if u == 0 { format!("{bytes} B") } else { format!("{v:.2} {}", UNITS[u]) }
+    if u == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{v:.2} {}", UNITS[u])
+    }
 }
 
 fn fmt_duration(secs: i64) -> String {
@@ -738,9 +750,9 @@ pub fn analyze_with(
     let nodes = result.index.nodes();
     let n = nodes.len();
     let mut max_child = vec![0u64; n];
-    for i in 1..n {
-        let p = nodes[i].parent.idx();
-        let b = nodes[i].usage.bytes;
+    for node in nodes.iter().skip(1) {
+        let p = node.parent.idx();
+        let b = node.usage.bytes;
         if b > max_child[p] {
             max_child[p] = b;
         }
@@ -797,14 +809,23 @@ pub fn analyze_with(
     for t in &temp_reports {
         let mut extra = Vec::new();
         if t.ram_backed {
-            extra.push(format!("{} is RAM-backed ({}): contents consume memory", t.label, t.fstype));
+            extra.push(format!(
+                "{} is RAM-backed ({}): contents consume memory",
+                t.label, t.fstype
+            ));
         }
-        if let Some(top) = t.owners.first() {
-            if top.percent >= 60.0 {
-                extra.push(format!("{:.0}% of the data is owned by {}", top.percent, top.name));
-            }
+        if let Some(top) = t.owners.first()
+            && top.percent >= 60.0
+        {
+            extra.push(format!(
+                "{:.0}% of the data is owned by {}",
+                top.percent, top.name
+            ));
         }
-        if matches!(t.assessment, TempAssessment::Stale | TempAssessment::LargeAndStale) {
+        if matches!(
+            t.assessment,
+            TempAssessment::Stale | TempAssessment::LargeAndStale
+        ) {
             extra.push(format!(
                 "{} ({:.0}%) untouched for {}+ days",
                 fmt_bytes(t.stale_bytes),
@@ -830,7 +851,10 @@ pub fn analyze_with(
                 extra.clone(),
             ));
         }
-        if let Some(f) = findings.iter_mut().find(|f| f.node == t.node && f.title.is_none()) {
+        if let Some(f) = findings
+            .iter_mut()
+            .find(|f| f.node == t.node && f.title.is_none())
+        {
             f.reasons.extend(extra);
         }
     }
@@ -856,21 +880,23 @@ pub fn analyze_with(
     }
 
     if let Some(nr) = &nix_report {
-        if let (Some(node), Some(rec)) = (nr.store_node, nix::reclaimable_bytes(nr)) {
-            if rec >= GIB {
-                findings.push(eng.synthetic(
-                    node,
-                    rec,
-                    "garbage-collectable Nix store data".to_string(),
-                    FindingKind::Nix,
-                    Expectation::Notable,
-                    vec!["unreferenced store paths per the Nix tools".to_string()],
-                ));
-            }
+        if let (Some(node), Some(rec)) = (nr.store_node, nix::reclaimable_bytes(nr))
+            && rec >= GIB
+        {
+            findings.push(eng.synthetic(
+                node,
+                rec,
+                "garbage-collectable Nix store data".to_string(),
+                FindingKind::Nix,
+                Expectation::Notable,
+                vec!["unreferenced store paths per the Nix tools".to_string()],
+            ));
         }
         if let (Some(node), Some(sys)) = (
             nr.store_node,
-            nr.generations.iter().find(|g| g.profile == "system" && g.count >= 20),
+            nr.generations
+                .iter()
+                .find(|g| g.profile == "system" && g.count >= 20),
         ) {
             findings.push(eng.synthetic(
                 node,
@@ -919,7 +945,9 @@ pub fn analyze_with(
         .iter()
         .map(|p| sat((p.used_percent / 100.0 - 0.7) / 0.27))
         .fold(0.0, f64::max);
-    let worst_pool = pool_scores.iter().max_by(|a, b| a.used_percent.total_cmp(&b.used_percent));
+    let worst_pool = pool_scores
+        .iter()
+        .max_by(|a, b| a.used_percent.total_cmp(&b.used_percent));
     let top_non_temp = findings
         .iter()
         .filter(|f| f.kind != FindingKind::Temporary)
@@ -1023,7 +1051,10 @@ pub fn analyze_with(
         node_severity,
         pool_scores,
         risk,
-        overall: Overall { severity: worst, qualifier },
+        overall: Overall {
+            severity: worst,
+            qualifier,
+        },
         temp: temp_reports,
         home: home_reports,
         nix: nix_report,

@@ -1,0 +1,30 @@
+ ROOTWATCH v0.4.0  /tmp/rootwatch-demo  root filesystem only                         ready (420 ms)
+ 1 Overview   2 Findings   3 Tree   4 Files   5 Coverage   6 Pools   7 Zones
+┌ Status ────────────────────────────────────────┐┌ Findings ──────────────────────────────────────┐
+│Overall      CRITICAL                           ││CRITICAL      1  █░░░░░░░░░░░░░                 │
+│Risk        71/100 CRITICAL                     ││HIGH          5  ██████░░░░░░░░                 │
+│Coverage    100.0%   COMPLETE                   ││MEDIUM        2  ███░░░░░░░░░░░                 │
+│Confidence  HIGH                                ││LOW           3  ████░░░░░░░░░░                 │
+│Scanned     29 entries, 20 dirs, 420 ms         ││11 in total, 11 listed in Findings              │
+│Issues      0 errors, 0 permission denied       ││main risk: concentration (59%)                  │
+└────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
+┌ Filesystems ────────────────────────────────────────┐┌ Largest areas ────────────────────────────┐
+│ /dev/vda          ████████░░░░  67% cov 100%        ││ 30.06 MiB   70% ████░░ /home              │
+│   20.91 MiB free                                    ││  6.01 MiB   14% █░░░░░ /tmp               │
+│                                                     ││  4.01 MiB  9.3% █░░░░░ /var               │
+│                                                     ││  3.01 MiB  7.0% ░░░░░░ /usr               │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+│                                                     ││                                           │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────┘
+↑↓ Pool  Enter Open pool  Tab Next view  r Rescan  ? Help  q Quit

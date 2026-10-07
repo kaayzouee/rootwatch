@@ -34,7 +34,11 @@ NIX:
                        (read-only; can take a while on big stores)
 
 OUTPUT:
-    --top N            rows per ranking (default 20)
+    --tui              interactive terminal UI instead of the text report
+                       (scanning runs in the background; all scope/NIX options
+                       apply; --privileged cannot be combined with --tui because
+                       sudo needs the terminal for its prompt)
+    --top N            rows per ranking in the text report (default 20)
     -h, --help         this text
     -V, --version
 ";
@@ -50,6 +54,7 @@ pub struct Cli {
     pub elevate: Vec<String>,
     pub nix_gc: bool,
     pub top: usize,
+    pub tui: bool,
     pub worker: bool,
     pub help: bool,
     pub version: bool,
@@ -67,6 +72,7 @@ impl Default for Cli {
             elevate: vec!["sudo".into()],
             nix_gc: false,
             top: 20,
+            tui: false,
             worker: false,
             help: false,
             version: false,
@@ -97,6 +103,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Cli, String> {
             "-h" | "--help" => cli.help = true,
             "-V" | "--version" => cli.version = true,
             "--worker" => cli.worker = true,
+            "--tui" => cli.tui = true,
             "--privileged" => cli.privileged = true,
             "--nix-gc" => cli.nix_gc = true,
             "--no-prune" => cli.no_prune = true,
@@ -149,6 +156,16 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Cli, String> {
     }
     if cli.scope == ScanScope::Selected && cli.include.is_empty() {
         return Err("--scope select needs at least one --include MOUNT".into());
+    }
+    if cli.tui && cli.privileged {
+        return Err(
+            "--privileged cannot be combined with --tui (sudo needs the terminal for its \
+             password prompt); run the text report with --privileged instead"
+                .into(),
+        );
+    }
+    if cli.tui && cli.worker {
+        return Err("--worker is internal and cannot be combined with --tui".into());
     }
     Ok(cli)
 }
@@ -226,6 +243,18 @@ mod tests {
         assert!(p(&["--bogus"]).is_err());
         assert!(p(&["/a", "/b"]).is_err());
         assert!(p(&["--top"]).is_err());
+    }
+
+    #[test]
+    fn tui_flag_is_opt_in_and_rejects_incompatible_modes() {
+        assert!(!p(&[]).unwrap().tui);
+        assert!(p(&["--tui", "/home"]).unwrap().tui);
+        assert!(p(&["--tui", "--privileged"]).is_err());
+        assert!(p(&["--tui", "--worker"]).is_err());
+        // scope options keep working alongside --tui
+        let c = p(&["--tui", "--scope", "all", "--nix-gc"]).unwrap();
+        assert_eq!(c.scope, ScanScope::All);
+        assert!(c.nix_gc);
     }
 
     #[test]

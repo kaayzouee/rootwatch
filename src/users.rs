@@ -22,10 +22,10 @@ impl UserNames {
         let mut map = FxHashMap::default();
         for line in text.lines() {
             let mut f = line.split(':');
-            if let (Some(name), Some(_), Some(uid)) = (f.next(), f.next(), f.next()) {
-                if let Ok(uid) = uid.parse::<u32>() {
-                    map.entry(uid).or_insert_with(|| name.to_string());
-                }
+            if let (Some(name), Some(_), Some(uid)) = (f.next(), f.next(), f.next())
+                && let Ok(uid) = uid.parse::<u32>()
+            {
+                map.entry(uid).or_insert_with(|| name.to_string());
             }
         }
         Self { map }

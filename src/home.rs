@@ -98,7 +98,11 @@ pub fn build(result: &ScanResult, _cfg: &AnalysisConfig, users: &UserNames) -> V
         let mut project_total = 0u64;
         let mut artifact_total = 0u64;
         let mut heap = TopK::new(10);
-        for p in result.projects.iter().filter(|p| result.index.node(p.node).zone as usize == zid) {
+        for p in result
+            .projects
+            .iter()
+            .filter(|p| result.index.node(p.node).zone as usize == zid)
+        {
             let pn = result.index.node(p.node);
             let artifacts: Vec<(String, u64)> = result
                 .artifacts

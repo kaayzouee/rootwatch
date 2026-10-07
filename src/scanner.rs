@@ -21,7 +21,7 @@
 // only heap objects created per directory are its node (amortised Vec growth)
 // and its name bytes.
 
-use crate::fxhash::{mix_component, hash_path_bytes, FxHashMap, FxHashSet};
+use crate::fxhash::{FxHashMap, FxHashSet, hash_path_bytes, mix_component};
 use crate::model::*;
 use crate::mounts::{FsKind, MountInfo, MountTable, PoolKey};
 use crate::topk::TopK;
@@ -34,12 +34,65 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::os::fd::{AsFd, OwnedFd};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 const ALLOCATED_BLOCK_SIZE: u64 = 512;
 const GETDENTS_BUFFER: usize = 128 * 1024;
 /// Safety valve for the u32 node ids and name offsets.
 const MAX_NODES: usize = (u32::MAX - 1024) as usize;
 const MAX_NAME_POOL: usize = (u32::MAX - (1 << 20)) as usize;
+
+/// Live counters for a scan in progress, readable from another thread.
+///
+/// Updated once per *directory* (not per entry) with relaxed atomics, and the
+/// current path is sampled only every `PATH_SAMPLE_EVERY` directories so that
+/// building it (O(depth)) stays negligible. When `ScanConfig::progress` is
+/// `None` the scanner does none of this work.
+#[derive(Debug, Default)]
+pub struct ScanProgress {
+    entries: AtomicU64,
+    directories: AtomicU64,
+    bytes: AtomicU64,
+    current: Mutex<PathBuf>,
+}
+
+/// A point-in-time copy of a [`ScanProgress`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProgressSnapshot {
+    pub entries: u64,
+    pub directories: u64,
+    pub bytes: u64,
+    pub current_path: Option<PathBuf>,
+}
+
+const PATH_SAMPLE_EVERY: u64 = 256;
+
+impl ScanProgress {
+    pub fn snapshot(&self) -> ProgressSnapshot {
+        let path = self.current.lock().map(|p| p.clone()).unwrap_or_default();
+        ProgressSnapshot {
+            entries: self.entries.load(Ordering::Relaxed),
+            directories: self.directories.load(Ordering::Relaxed),
+            bytes: self.bytes.load(Ordering::Relaxed),
+            current_path: (!path.as_os_str().is_empty()).then_some(path),
+        }
+    }
+
+    /// One directory has been read: `entries` it contained, `bytes` of files
+    /// accounted directly in it. Returns how many directories have been read.
+    fn record_dir(&self, entries: u64, bytes: u64) -> u64 {
+        self.entries.fetch_add(entries, Ordering::Relaxed);
+        self.bytes.fetch_add(bytes, Ordering::Relaxed);
+        self.directories.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    fn set_current(&self, path: PathBuf) {
+        if let Ok(mut c) = self.current.lock() {
+            *c = path;
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ScanConfig {
@@ -58,6 +111,8 @@ pub struct ScanConfig {
     pub now_unix: Option<i64>,
     /// Pre-read mount table (tests); defaults to /proc/self/mountinfo.
     pub mounts: Option<MountTable>,
+    /// Optional live progress sink (used by the TUI).
+    pub progress: Option<Arc<ScanProgress>>,
 }
 
 impl Default for ScanConfig {
@@ -72,6 +127,7 @@ impl Default for ScanConfig {
             zone_top_files: 10,
             now_unix: None,
             mounts: None,
+            progress: None,
         }
     }
 }
@@ -219,6 +275,7 @@ struct Scanner<'a> {
     nix: NixScan,
     top_files: TopK<FileCand>,
     ownership: [u64; 3],
+    progress: Option<Arc<ScanProgress>>,
     now: i64,
     subtree: bool,
     includes: Vec<PathBuf>,
@@ -345,7 +402,11 @@ impl<'a> Scanner<'a> {
                 };
                 (i.fstype.clone(), i.kind, label)
             }
-            None => ("unknown".to_string(), FsKind::Disk, path.display().to_string()),
+            None => (
+                "unknown".to_string(),
+                FsKind::Disk,
+                path.display().to_string(),
+            ),
         };
         let id = self.pools.len();
         self.pools.push(StoragePool {
@@ -359,10 +420,10 @@ impl<'a> Scanner<'a> {
     }
 
     fn lookup_mount(&self, mnt: u64, dev: u64, path: &Path) -> Option<MountInfo> {
-        if mnt != 0 {
-            if let Some(m) = self.mounts.get(mnt) {
-                return Some(m.clone());
-            }
+        if mnt != 0
+            && let Some(m) = self.mounts.get(mnt)
+        {
+            return Some(m.clone());
         }
         self.mounts
             .iter()
@@ -416,7 +477,13 @@ impl<'a> Scanner<'a> {
         if dev == ctx.dev {
             return match &info {
                 Some(i) if !self.subtree && !self.mounts.is_self_bind(i) => {
-                    self.record_boundary(&path, dev, mnt, Some(i), BoundaryDecision::Skipped(SkipReason::DuplicateBind));
+                    self.record_boundary(
+                        &path,
+                        dev,
+                        mnt,
+                        Some(i),
+                        BoundaryDecision::Skipped(SkipReason::DuplicateBind),
+                    );
                     Outcome::Skip
                 }
                 _ => Outcome::SameFs,
@@ -430,7 +497,13 @@ impl<'a> Scanner<'a> {
         let _ = (fstype, source);
 
         if self.entered_devs.contains_key(&dev) {
-            self.record_boundary(&path, dev, mnt, info.as_ref(), BoundaryDecision::Skipped(SkipReason::DuplicateBind));
+            self.record_boundary(
+                &path,
+                dev,
+                mnt,
+                info.as_ref(),
+                BoundaryDecision::Skipped(SkipReason::DuplicateBind),
+            );
             return Outcome::Skip;
         }
 
@@ -459,7 +532,13 @@ impl<'a> Scanner<'a> {
                 FsKind::Layered => SkipReason::Layered,
                 FsKind::Disk | FsKind::Memory => SkipReason::OutOfScope,
             };
-            self.record_boundary(&path, dev, mnt, info.as_ref(), BoundaryDecision::Skipped(reason));
+            self.record_boundary(
+                &path,
+                dev,
+                mnt,
+                info.as_ref(),
+                BoundaryDecision::Skipped(reason),
+            );
             return Outcome::Skip;
         }
 
@@ -548,10 +627,8 @@ impl<'a> Scanner<'a> {
                 if name == b"." || name == b".." {
                     continue;
                 }
-                if detect_projects {
-                    if let Some(k) = ProjectKind::from_marker(name) {
-                        project_kind = Some(project_kind.map_or(k, |p| p.stronger(k)));
-                    }
+                if detect_projects && let Some(k) = ProjectKind::from_marker(name) {
+                    project_kind = Some(project_kind.map_or(k, |p| p.stronger(k)));
                 }
 
                 let st = match statx(fd, cname, statx_at_flags(), STATX_MASK) {
@@ -655,6 +732,13 @@ impl<'a> Scanner<'a> {
             }
         }
 
+        if let Some(progress) = &self.progress {
+            let dirs_read = progress.record_dir(acc.counts.entries, acc.bytes);
+            if dirs_read % PATH_SAMPLE_EVERY == 1 {
+                progress.set_current(self.index.path(node));
+            }
+        }
+
         // Project / artifact fix-up for the children we just queued.
         if let Some(kind) = project_kind {
             self.index.nodes[node.idx()].flags |= flags::PROJECT;
@@ -737,12 +821,13 @@ impl<'a> Scanner<'a> {
                 child_ctx.bucket = None;
                 child_ctx.in_project = false;
             }
-        } else if at_zone_root && ctx.zone != NO_ZONE {
-            if self.zones[ctx.zone as usize].role == Role::HomeZone {
-                let b = HomeBucket::classify(name);
-                child_ctx.bucket = Some(b);
-                home_bucket_rec = Some((ctx.zone as usize, b));
-            }
+        } else if at_zone_root
+            && ctx.zone != NO_ZONE
+            && self.zones[ctx.zone as usize].role == Role::HomeZone
+        {
+            let b = HomeBucket::classify(name);
+            child_ctx.bucket = Some(b);
+            home_bucket_rec = Some((ctx.zone as usize, b));
         }
 
         let Some(id) = self.push_node(parent, name, Some(st), &child_ctx, node_flags) else {
@@ -758,11 +843,8 @@ impl<'a> Scanner<'a> {
         if let Some(fs) = entered_fs {
             self.filesystems[fs as usize].root_node = id;
         }
-        if let Some((role, zid)) = zone_role_here {
-            match role {
-                Role::NixStore => self.nix.store_zone = Some(zid as usize),
-                _ => {}
-            }
+        if let Some((Role::NixStore, zid)) = zone_role_here {
+            self.nix.store_zone = Some(zid as usize);
         }
         if let Some((zone, bucket)) = home_bucket_rec {
             self.home_buckets.push(HomeBucketRec {
@@ -903,6 +985,7 @@ pub fn scan(root: &Path, config: &ScanConfig) -> io::Result<ScanResult> {
         nix: NixScan::default(),
         top_files: TopK::new(config.top_files),
         ownership: [0; 3],
+        progress: config.progress.clone(),
         now,
         subtree: false,
         include_reached: vec![false; includes.len()],
@@ -915,9 +998,7 @@ pub fn scan(root: &Path, config: &ScanConfig) -> io::Result<ScanResult> {
         .lookup_mount(root_mnt, root_dev, root)
         .or_else(|| sc.mounts.containing(root).cloned());
     let fs0 = sc.register_fs(root_mount.as_ref(), root_dev, root_mnt, root, NodeId(0));
-    sc.subtree = root_mount
-        .as_ref()
-        .is_some_and(|m| m.mountpoint != root);
+    sc.subtree = root_mount.as_ref().is_some_and(|m| m.mountpoint != root);
     let filesystem = sc.filesystems[fs0 as usize].info.clone();
 
     let (cursor, root_role) = sc.trie.descend_root(root);
@@ -934,9 +1015,8 @@ pub fn scan(root: &Path, config: &ScanConfig) -> io::Result<ScanResult> {
     if let Some(role) = root_role {
         if role.is_zone() {
             ctx.zone = sc.new_zone(role, NodeId(0), fs0, root_st.stx_uid);
-            match role {
-                Role::NixStore => sc.nix.store_zone = Some(ctx.zone as usize),
-                _ => {}
+            if role == Role::NixStore {
+                sc.nix.store_zone = Some(ctx.zone as usize);
             }
         } else if role == Role::NixDb {
             sc.nix.db = Some(NodeId(0));
@@ -964,9 +1044,7 @@ pub fn scan(root: &Path, config: &ScanConfig) -> io::Result<ScanResult> {
             let (head, tail) = nodes.split_at_mut(i);
             let child = &tail[0];
             let parent = &mut head[child.parent.idx()];
-            parent
-                .usage
-                .add_child(&child.usage, child.fs == parent.fs);
+            parent.usage.add_child(&child.usage, child.fs == parent.fs);
             if child.newest_mtime > parent.newest_mtime {
                 parent.newest_mtime = child.newest_mtime;
             }
@@ -1010,7 +1088,12 @@ pub fn scan(root: &Path, config: &ScanConfig) -> io::Result<ScanResult> {
             fs: z.fs,
             owner_uid: z.uid,
             owners,
-            top_files: z.top.into_sorted_desc().into_iter().map(&to_record).collect(),
+            top_files: z
+                .top
+                .into_sorted_desc()
+                .into_iter()
+                .map(&to_record)
+                .collect(),
             loose_bytes: z.loose_bytes,
             loose_files: z.loose_files,
         });

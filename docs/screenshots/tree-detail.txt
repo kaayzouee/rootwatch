@@ -1,0 +1,34 @@
+ ROOTWATCH v0.4.0  /tmp/rootwatch-demo  root filesystem only                                             ready (420 ms)
+ 1 Overview   2 Findings   3 Tree   4 Files   5 Coverage   6 Pools   7 Zones
+┌ Tree (sorted by size) ─────────────────────────────────────────┐┌ Directory ─────────────────────────────────────────┐
+│▾ /tmp/rootwatch-demo                     43.09 MiB  100%       ││/tmp/rootwatch-demo                                 │
+│├─ ▾ home                                 30.06 MiB   70% ● 59.0││Size        43.09 MiB (subtree)                     │
+││  └─ ▾ kay                               30.06 MiB   70% ● 59.0││Filesystem  / (ext4)                                │
+││     ├─   Downloads                      12.00 MiB   28% ● 25.6││Pool        /dev/vda (ext4)                         │
+││     ├─ ▾ projects                        9.04 MiB   21% ● 15.4││Score       the scan root is never scored           │
+││     │  └─ ▸ rootwatch [P]                9.03 MiB   21% ● 12.3││Class       generic                                 │
+││     ├─ ▾ .cache                          6.01 MiB   14% ● 12.8││Owner       root                                    │
+││     │  └─   mozilla                      6.00 MiB   14% ● 12.8││Newest      2027-01-15 (today)                      │
+││     └─ ▾ .cargo                          3.01 MiB  7.0% ·  4.1││Contents    10 files, 19 dirs, 0 links, 0 errors    │
+││        └─   registry                     3.00 MiB  7.0% ·  4.1││                                                    │
+│├─ ▾ tmp                                   6.01 MiB   14% ● 29.0││Age of data                                         │
+││  └─   build-4711                         5.00 MiB   12% ● 25.6││<1d     ░░░░░░░░░░░░░░   1.00 MiB                   │
+│├─ ▾ var                                   4.01 MiB  9.3% ●  5.7││1-7d    ████░░░░░░░░░░  13.02 MiB                   │
+││  └─ ▾ log                                4.01 MiB  9.3% ●  5.7││7-30d   █░░░░░░░░░░░░░   3.00 MiB                   │
+││     └─   journal                         4.00 MiB  9.3% ●  5.7││30-90d  ██░░░░░░░░░░░░   5.00 MiB                   │
+│└─ ▾ usr                                   3.01 MiB  7.0% ·  1.4││90-365d ███░░░░░░░░░░░   9.08 MiB                   │
+│   └─   lib                                3.00 MiB  7.0% ·  1.4││>1y     ████░░░░░░░░░░  12.00 MiB                   │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+│                                                                ││                                                    │
+└────────────────────────────────────────────────────────────────┘└────────────────────────────────────────────────────┘
+↑↓ Move  → Expand  ← Collapse  Enter Details  s Sort  / Search  Tab Next view  r Rescan  ? Help  q Quit

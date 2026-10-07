@@ -110,7 +110,9 @@ fn unescape(field: &[u8]) -> Vec<u8> {
     while i < field.len() {
         if field[i] == b'\\'
             && i + 4 <= field.len()
-            && field[i + 1..i + 4].iter().all(|b| (b'0'..=b'7').contains(b))
+            && field[i + 1..i + 4]
+                .iter()
+                .all(|b| (b'0'..=b'7').contains(b))
         {
             let v = (field[i + 1] - b'0') as u32 * 64
                 + (field[i + 2] - b'0') as u32 * 8
@@ -127,7 +129,10 @@ fn unescape(field: &[u8]) -> Vec<u8> {
 
 fn parse_line(line: &[u8]) -> Option<MountInfo> {
     use std::os::unix::ffi::OsStringExt;
-    let fields: Vec<&[u8]> = line.split(|&b| b == b' ').filter(|f| !f.is_empty()).collect();
+    let fields: Vec<&[u8]> = line
+        .split(|&b| b == b' ')
+        .filter(|f| !f.is_empty())
+        .collect();
     if fields.len() < 10 {
         return None;
     }
@@ -240,7 +245,10 @@ mod tests {
         assert_eq!(t.len(), 6);
         assert_eq!(t.get(25).unwrap().kind, FsKind::Memory);
         assert_eq!(t.get(26).unwrap().kind, FsKind::Pseudo);
-        assert_eq!(t.get(27).unwrap().mountpoint, PathBuf::from("/mnt/with space"));
+        assert_eq!(
+            t.get(27).unwrap().mountpoint,
+            PathBuf::from("/mnt/with space")
+        );
         assert!(t.get(24).unwrap().read_only);
     }
 

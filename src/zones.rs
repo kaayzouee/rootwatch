@@ -486,7 +486,10 @@ mod tests {
         assert_eq!(HomeBucket::classify(b".cache"), HomeBucket::Cache);
         assert_eq!(HomeBucket::classify(b".mozilla"), HomeBucket::OtherHidden);
         assert_eq!(HomeBucket::classify(b"code"), HomeBucket::Other);
-        assert_eq!(ProjectKind::from_marker(b"Cargo.toml"), Some(ProjectKind::Cargo));
+        assert_eq!(
+            ProjectKind::from_marker(b"Cargo.toml"),
+            Some(ProjectKind::Cargo)
+        );
         assert_eq!(
             ProjectKind::Git.stronger(ProjectKind::Node),
             ProjectKind::Node

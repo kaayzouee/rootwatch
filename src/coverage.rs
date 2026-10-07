@@ -185,8 +185,11 @@ pub fn assess(result: &ScanResult) -> CoverageReport {
     // Which pools did we actually walk?
     let mut pools: Vec<PoolCoverage> = Vec::new();
     for (pid, pool) in result.pools.iter().enumerate() {
-        let scanned_fs: Vec<&FilesystemScan> =
-            result.filesystems.iter().filter(|f| f.pool == pid).collect();
+        let scanned_fs: Vec<&FilesystemScan> = result
+            .filesystems
+            .iter()
+            .filter(|f| f.pool == pid)
+            .collect();
         if scanned_fs.is_empty() {
             continue;
         }
