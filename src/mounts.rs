@@ -18,7 +18,7 @@ pub enum FsKind {
     Memory,
     /// Kernel interfaces (proc, sysfs, cgroup, devtmpfs, ...).
     Pseudo,
-    /// Remote or FUSE: can hang or be enormous, never scanned implicitly.
+    /// Remote, cluster-shared, or FUSE: never scanned implicitly.
     Network,
     /// Read-only images (squashfs, erofs): backed by a file already counted.
     Image,
@@ -49,19 +49,20 @@ impl FsKind {
             | "hugetlbfs" | "autofs" | "binfmt_misc" | "efivarfs" | "selinuxfs" | "nsfs"
             | "rpc_pipefs" | "binderfs" | "devfs" | "fuse.portal" | "fuse.gvfsd-fuse"
             | "fuse.xwayland" => Self::Pseudo,
+            // Shared cluster filesystems and FUSE-backed block mounts are
+            // opt-in, even when an instance (e.g. NTFS-3G) is backed locally.
             "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "afs" | "ceph" | "glusterfs"
-            | "lustre" | "9p" | "virtiofs" | "davfs" | "ncpfs" => Self::Network,
+            | "lustre" | "9p" | "virtiofs" | "davfs" | "ncpfs" | "gfs2" | "ocfs2"
+            | "fuseblk" => Self::Network,
             "squashfs" | "erofs" | "cramfs" => Self::Image,
             "overlay" | "aufs" => Self::Layered,
-            // ntfs-3g and friends mount local block devices through FUSE.
-            "fuseblk" => Self::Disk,
             t if t == "fuse" || t.starts_with("fuse.") => Self::Network,
             // Only known local filesystem types may be entered by --scope all.
             // A new or host-shared type must be explicitly opted into.
             "ext2" | "ext3" | "ext4" | "xfs" | "btrfs" | "bcachefs" | "f2fs" | "jfs"
             | "reiserfs" | "nilfs2" | "vfat" | "msdos" | "exfat" | "ntfs" | "ntfs3" | "zfs"
-            | "hfs" | "hfsplus" | "apfs" | "udf" | "iso9660" | "ufs" | "minix" | "ocfs2"
-            | "gfs2" | "ubifs" | "jffs2" | "yaffs2" => Self::Disk,
+            | "hfs" | "hfsplus" | "apfs" | "udf" | "iso9660" | "ufs" | "minix" | "ubifs"
+            | "jffs2" | "yaffs2" => Self::Disk,
             _ => Self::Unknown,
         }
     }
@@ -283,9 +284,10 @@ mod tests {
     }
 
     #[test]
-    fn fuse_defaults_to_network_but_fuseblk_is_disk() {
-        assert_eq!(FsKind::classify("fuse.sshfs"), FsKind::Network);
-        assert_eq!(FsKind::classify("fuseblk"), FsKind::Disk);
+    fn fuse_and_cluster_shared_filesystems_are_opt_in() {
+        for fstype in ["fuse.sshfs", "fuseblk", "gfs2", "ocfs2", "virtiofs"] {
+            assert_eq!(FsKind::classify(fstype), FsKind::Network, "{fstype}");
+        }
         assert_eq!(FsKind::classify("overlay"), FsKind::Layered);
     }
 
@@ -293,7 +295,7 @@ mod tests {
     fn recognized_local_filesystems_remain_disk_backed() {
         for fstype in [
             "ext2", "ext4", "xfs", "btrfs", "bcachefs", "f2fs", "vfat", "exfat", "ntfs3", "zfs",
-            "ubifs", "fuseblk",
+            "ubifs",
         ] {
             assert_eq!(FsKind::classify(fstype), FsKind::Disk, "{fstype}");
         }
@@ -312,10 +314,14 @@ mod tests {
 
         let table = MountTable::parse(
             b"28 22 0:99 / /mnt/host rw - virtiofs hostshare rw\n\
-29 22 0:100 / /mnt/novel rw - futurefs source rw\n",
+29 22 0:100 / /mnt/novel rw - futurefs source rw\n\
+30 22 0:101 / /mnt/cluster rw - gfs2 /dev/cluster rw\n\
+31 22 0:102 / /mnt/ntfs rw - fuseblk /dev/sdb1 rw\n",
         );
         assert_eq!(table.get(28).unwrap().kind, FsKind::Network);
         assert_eq!(table.get(29).unwrap().kind, FsKind::Unknown);
         assert_eq!(table.get(29).unwrap().fstype, "futurefs");
+        assert_eq!(table.get(30).unwrap().kind, FsKind::Network);
+        assert_eq!(table.get(31).unwrap().kind, FsKind::Network);
     }
 }

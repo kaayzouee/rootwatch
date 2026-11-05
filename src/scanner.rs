@@ -1166,6 +1166,19 @@ mod tests {
     }
 
     #[test]
+    fn shared_and_fuse_block_mounts_require_explicit_includes() {
+        for fstype in ["gfs2", "ocfs2", "fuseblk"] {
+            let kind = FsKind::classify(fstype);
+            assert_eq!(
+                boundary_skip_reason(ScanScope::All, kind, false),
+                Some(SkipReason::Network),
+                "{fstype} must not be scanned implicitly",
+            );
+            assert_eq!(boundary_skip_reason(ScanScope::All, kind, true), None);
+        }
+    }
+
+    #[test]
     fn explicit_includes_override_all_scope_and_kind_restrictions() {
         for scope in [ScanScope::Root, ScanScope::Selected, ScanScope::All] {
             for kind in [
