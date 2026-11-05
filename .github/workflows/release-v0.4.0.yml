@@ -1,0 +1,97 @@
+name: Release v0.4.0
+
+# One-time publishing workflow. Adding this file to main triggers a single release.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/release-v0.4.0.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rootwatch-release-v0.4.0
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'kaayzouee/rootwatch'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout release sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+
+      - name: Verify version and build
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^version = "0.4.0"$' Cargo.toml
+          cargo build --release --locked --bin rootwatch
+          strip --strip-unneeded target/release/rootwatch
+
+      - name: Package minimal binary and source archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary_dir="rootwatch-v0.4.0-linux-x86_64"
+          src_dir="rootwatch-v0.4.0-source"
+          mkdir -p "dist/${binary_dir}"
+          install -m 0755 target/release/rootwatch "dist/${binary_dir}/rootwatch"
+          install -m 0644 LICENSE "dist/${binary_dir}/LICENSE"
+          (
+            cd dist
+            zip -X -9 -q -r "${binary_dir}.zip" "${binary_dir}"
+            tar -czf "${binary_dir}.tar.gz" "${binary_dir}"
+          )
+          # Only the buildable Rust project, license, change log, and tests/examples.
+          # No screenshots, generated outputs, VCS metadata, or CI files.
+          source_paths=(Cargo.toml Cargo.lock README.md CHANGELOG.md LICENSE src tests examples)
+          git archive --format=zip --prefix="${src_dir}/" --output="dist/${src_dir}.zip" HEAD "${source_paths[@]}"
+          git archive --format=tar --prefix="${src_dir}/" HEAD "${source_paths[@]}" | gzip -9 > "dist/${src_dir}.tar.gz"
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
+          unzip -tqq "dist/${binary_dir}.zip"
+          unzip -tqq "dist/${src_dir}.zip"
+          tar -tzf "dist/${binary_dir}.tar.gz" > /dev/null
+          tar -tzf "dist/${src_dir}.tar.gz" > /dev/null
+          file "dist/${binary_dir}/rootwatch"
+
+      - name: Generate release notes and SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          Rootwatch v0.4.0 adds an interactive terminal UI with seven views, live scan progress, searchable findings and file trees, and clearer filesystem coverage reporting. See CHANGELOG.md for the complete changes.
+
+          **Prebuilt archives** are stripped, release-mode Linux x86-64 binaries (built on Ubuntu 22.04) with the GPL license. They contain no sources, tests, screenshots, or build artifacts.
+
+          **Source archives** include Cargo.toml, Cargo.lock, Rust source, tests, examples, README, changelog, and GPL license. They omit media, generated files, and CI configuration.
+
+          Build from source with `cargo build --release --locked`.
+
+          SHA-256 checksums:
+          ```
+          NOTES
+          (cd dist && sha256sum *.zip *.tar.gz) >> release-notes.md
+          echo '```' >> release-notes.md
+
+      - name: Publish GitHub release and four archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create v0.4.0 \
+            dist/rootwatch-v0.4.0-linux-x86_64.zip \
+            dist/rootwatch-v0.4.0-linux-x86_64.tar.gz \
+            dist/rootwatch-v0.4.0-source.zip \
+            dist/rootwatch-v0.4.0-source.tar.gz \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Rootwatch v0.4.0" \
+            --notes-file release-notes.md
