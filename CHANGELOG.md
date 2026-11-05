@@ -2,6 +2,11 @@
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Security
+- Prevent `--scope all` from silently scanning unrecognized filesystems. Only recognized local filesystems are classified as disk-backed; `virtiofs` is treated as host-shared, and unknown mount types or missing mount metadata require an explicit `--include`. Added regression tests for filesystem classification and scope overrides.
+
 ## [0.4.0]
 
 ### Added

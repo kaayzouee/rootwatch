@@ -24,6 +24,8 @@ pub enum FsKind {
     Image,
     /// Union views (overlayfs): content is reachable through its layers.
     Layered,
+    /// Unrecognized type: may be remote or virtual, never scanned implicitly.
+    Unknown,
 }
 
 impl FsKind {
@@ -35,6 +37,7 @@ impl FsKind {
             Self::Network => "network/fuse",
             Self::Image => "image",
             Self::Layered => "layered",
+            Self::Unknown => "unknown",
         }
     }
 
@@ -47,13 +50,19 @@ impl FsKind {
             | "rpc_pipefs" | "binderfs" | "devfs" | "fuse.portal" | "fuse.gvfsd-fuse"
             | "fuse.xwayland" => Self::Pseudo,
             "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "afs" | "ceph" | "glusterfs"
-            | "lustre" | "9p" | "davfs" | "ncpfs" => Self::Network,
+            | "lustre" | "9p" | "virtiofs" | "davfs" | "ncpfs" => Self::Network,
             "squashfs" | "erofs" | "cramfs" => Self::Image,
             "overlay" | "aufs" => Self::Layered,
             // ntfs-3g and friends mount local block devices through FUSE.
             "fuseblk" => Self::Disk,
             t if t == "fuse" || t.starts_with("fuse.") => Self::Network,
-            _ => Self::Disk,
+            // Only known local filesystem types may be entered by --scope all.
+            // A new or host-shared type must be explicitly opted into.
+            "ext2" | "ext3" | "ext4" | "xfs" | "btrfs" | "bcachefs" | "f2fs" | "jfs"
+            | "reiserfs" | "nilfs2" | "vfat" | "msdos" | "exfat" | "ntfs" | "ntfs3"
+            | "zfs" | "hfs" | "hfsplus" | "apfs" | "udf" | "iso9660" | "ufs"
+            | "minix" | "ocfs2" | "gfs2" | "ubifs" | "jffs2" | "yaffs2" => Self::Disk,
+            _ => Self::Unknown,
         }
     }
 }
@@ -278,5 +287,35 @@ mod tests {
         assert_eq!(FsKind::classify("fuse.sshfs"), FsKind::Network);
         assert_eq!(FsKind::classify("fuseblk"), FsKind::Disk);
         assert_eq!(FsKind::classify("overlay"), FsKind::Layered);
+    }
+
+    #[test]
+    fn recognized_local_filesystems_remain_disk_backed() {
+        for fstype in [
+            "ext2", "ext4", "xfs", "btrfs", "bcachefs", "f2fs", "vfat", "exfat",
+            "ntfs3", "zfs", "ubifs", "fuseblk",
+        ] {
+            assert_eq!(FsKind::classify(fstype), FsKind::Disk, "{fstype}");
+        }
+        assert_eq!(FsKind::classify("tmpfs"), FsKind::Memory);
+        assert_eq!(FsKind::classify("squashfs"), FsKind::Image);
+        assert_eq!(FsKind::classify("proc"), FsKind::Pseudo);
+        assert_eq!(FsKind::classify("nfs4"), FsKind::Network);
+    }
+
+    #[test]
+    fn unknown_and_host_shared_filesystems_are_not_classified_as_disk() {
+        assert_eq!(FsKind::classify("virtiofs"), FsKind::Network);
+        for fstype in ["futurefs", "mystery_remote", "customfs", ""] {
+            assert_eq!(FsKind::classify(fstype), FsKind::Unknown, "{fstype}");
+        }
+
+        let table = MountTable::parse(
+            b"28 22 0:99 / /mnt/host rw - virtiofs hostshare rw\n\
+29 22 0:100 / /mnt/novel rw - futurefs source rw\n",
+        );
+        assert_eq!(table.get(28).unwrap().kind, FsKind::Network);
+        assert_eq!(table.get(29).unwrap().kind, FsKind::Unknown);
+        assert_eq!(table.get(29).unwrap().fstype, "futurefs");
     }
 }

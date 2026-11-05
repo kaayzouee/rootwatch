@@ -140,7 +140,7 @@
 <ul>
   <li><code>ScanScope::Root</code> (default): only the filesystem holding the scan root; other mounts are listed with the reason they were skipped.</li>
 
-  <li><code>ScanScope::All</code>: plus every local disk-backed or tmpfs mount. Pseudo (<code>proc</code>, <code>sysfs</code>, ...), network/FUSE, overlay and squashfs/erofs image mounts are never entered implicitly.</li>
+  <li><code>ScanScope::All</code>: plus recognized local disk-backed or tmpfs mounts. Pseudo (<code>proc</code>, <code>sysfs</code>, ...), network/FUSE and host-shared (<code>virtiofs</code>), unrecognized mount types, overlay and squashfs/erofs image mounts are never entered implicitly. Use <code>--include</code> to opt into an unrecognized mount.</li>
 
   <li><code>ScanScope::Selected</code>: plus the mounts named with <code>--include</code>. An include forces a mount in regardless of kind, and implies its ancestor mounts.</li>
 
