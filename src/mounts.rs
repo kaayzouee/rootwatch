@@ -59,9 +59,9 @@ impl FsKind {
             // Only known local filesystem types may be entered by --scope all.
             // A new or host-shared type must be explicitly opted into.
             "ext2" | "ext3" | "ext4" | "xfs" | "btrfs" | "bcachefs" | "f2fs" | "jfs"
-            | "reiserfs" | "nilfs2" | "vfat" | "msdos" | "exfat" | "ntfs" | "ntfs3"
-            | "zfs" | "hfs" | "hfsplus" | "apfs" | "udf" | "iso9660" | "ufs"
-            | "minix" | "ocfs2" | "gfs2" | "ubifs" | "jffs2" | "yaffs2" => Self::Disk,
+            | "reiserfs" | "nilfs2" | "vfat" | "msdos" | "exfat" | "ntfs" | "ntfs3" | "zfs"
+            | "hfs" | "hfsplus" | "apfs" | "udf" | "iso9660" | "ufs" | "minix" | "ocfs2"
+            | "gfs2" | "ubifs" | "jffs2" | "yaffs2" => Self::Disk,
             _ => Self::Unknown,
         }
     }
@@ -292,8 +292,8 @@ mod tests {
     #[test]
     fn recognized_local_filesystems_remain_disk_backed() {
         for fstype in [
-            "ext2", "ext4", "xfs", "btrfs", "bcachefs", "f2fs", "vfat", "exfat",
-            "ntfs3", "zfs", "ubifs", "fuseblk",
+            "ext2", "ext4", "xfs", "btrfs", "bcachefs", "f2fs", "vfat", "exfat", "ntfs3", "zfs",
+            "ubifs", "fuseblk",
         ] {
             assert_eq!(FsKind::classify(fstype), FsKind::Disk, "{fstype}");
         }
