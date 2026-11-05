@@ -140,7 +140,7 @@
 <ul>
   <li><code>ScanScope::Root</code> (default): only the filesystem holding the scan root; other mounts are listed with the reason they were skipped.</li>
 
-  <li><code>ScanScope::All</code>: plus every local disk-backed or tmpfs mount. Pseudo (<code>proc</code>, <code>sysfs</code>, ...), network/FUSE, overlay and squashfs/erofs image mounts are never entered implicitly.</li>
+  <li><code>ScanScope::All</code>: plus recognized local disk-backed or tmpfs mounts. Pseudo (<code>proc</code>, <code>sysfs</code>, ...), network/FUSE and shared storage (<code>virtiofs</code>, <code>gfs2</code>, <code>ocfs2</code>, <code>fuseblk</code>), unrecognized mount types, overlay and squashfs/erofs image mounts are never entered implicitly. Local NTFS-3G mounts reported as <code>fuseblk</code> also require an explicit <code>--include</code>. Filesystem type alone cannot prove a block device is physically local.</li>
 
   <li><code>ScanScope::Selected</code>: plus the mounts named with <code>--include</code>. An include forces a mount in regardless of kind, and implies its ancestor mounts.</li>
 

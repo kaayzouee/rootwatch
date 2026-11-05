@@ -2,6 +2,14 @@
 
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+- `--scope all` no longer implicitly enters `fuseblk` mounts, including local NTFS-3G mounts; opt in using `--include` to scan one.
+
+### Security
+- Prevent `--scope all` from silently scanning unrecognized or shared filesystems. Known shared or potentially remote types (`virtiofs`, `gfs2`, `ocfs2`, and `fuseblk`) and unknown mount types or missing mount metadata require an explicit `--include`. Added regression tests for filesystem classification and scope overrides.
+
 ## [0.4.0]
 
 ### Added

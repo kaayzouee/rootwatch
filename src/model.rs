@@ -326,6 +326,8 @@ pub enum SkipReason {
     Network,
     Image,
     Layered,
+    /// Unknown filesystem type; require an explicit include.
+    Unknown,
     /// Same filesystem content is already reachable through another path.
     DuplicateBind,
 }
@@ -338,6 +340,7 @@ impl SkipReason {
             Self::Network => "network/FUSE filesystem",
             Self::Image => "read-only image (already counted as a file)",
             Self::Layered => "layered view (content reachable via its layers)",
+            Self::Unknown => "unclassified filesystem (use --include to enter)",
             Self::DuplicateBind => "bind mount of content scanned elsewhere",
         }
     }

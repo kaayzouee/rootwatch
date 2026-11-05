@@ -255,6 +255,23 @@ enum Outcome {
     Enter(FsId),
 }
 
+/// Return the reason a mount is excluded from the configured scan scope.
+/// --include always wins; --scope all admits only recognized local filesystems.
+fn boundary_skip_reason(scope: ScanScope, kind: FsKind, included: bool) -> Option<SkipReason> {
+    if included || (scope == ScanScope::All && matches!(kind, FsKind::Disk | FsKind::Memory)) {
+        return None;
+    }
+
+    Some(match kind {
+        FsKind::Pseudo => SkipReason::Pseudo,
+        FsKind::Network => SkipReason::Network,
+        FsKind::Image => SkipReason::Image,
+        FsKind::Layered => SkipReason::Layered,
+        FsKind::Unknown => SkipReason::Unknown,
+        FsKind::Disk | FsKind::Memory => SkipReason::OutOfScope,
+    })
+}
+
 struct Scanner<'a> {
     config: &'a ScanConfig,
     trie: Trie,
@@ -404,7 +421,7 @@ impl<'a> Scanner<'a> {
             }
             None => (
                 "unknown".to_string(),
-                FsKind::Disk,
+                FsKind::Unknown,
                 path.display().to_string(),
             ),
         };
@@ -448,7 +465,7 @@ impl<'a> Scanner<'a> {
             mount_id: (mnt != 0).then_some(mnt),
             fstype: info.map_or_else(|| "unknown".into(), |i| i.fstype.clone()),
             source: info.map(|i| i.source.clone()).unwrap_or_default(),
-            kind: info.map_or(FsKind::Disk, |i| i.kind),
+            kind: info.map_or(FsKind::Unknown, |i| i.kind),
             pool,
             info: filesystem_info(path).unwrap_or(FilesystemInfo::EMPTY),
             root_node,
@@ -490,11 +507,8 @@ impl<'a> Scanner<'a> {
             };
         }
 
-        let (kind, fstype, source) = info
-            .as_ref()
-            .map(|i| (i.kind, i.fstype.clone(), i.source.clone()))
-            .unwrap_or((FsKind::Disk, "unknown".into(), String::new()));
-        let _ = (fstype, source);
+        // If mount discovery cannot identify a boundary, do not infer disk.
+        let kind = info.as_ref().map_or(FsKind::Unknown, |i| i.kind);
 
         if self.entered_devs.contains_key(&dev) {
             self.record_boundary(
@@ -520,18 +534,7 @@ impl<'a> Scanner<'a> {
             }
         }
         let included = !include_hit.is_empty();
-        let allowed = included
-            || (self.config.scope == ScanScope::All
-                && matches!(kind, FsKind::Disk | FsKind::Memory));
-
-        if !allowed {
-            let reason = match kind {
-                FsKind::Pseudo => SkipReason::Pseudo,
-                FsKind::Network => SkipReason::Network,
-                FsKind::Image => SkipReason::Image,
-                FsKind::Layered => SkipReason::Layered,
-                FsKind::Disk | FsKind::Memory => SkipReason::OutOfScope,
-            };
+        if let Some(reason) = boundary_skip_reason(self.config.scope, kind, included) {
             self.record_boundary(
                 &path,
                 dev,
@@ -563,7 +566,7 @@ impl<'a> Scanner<'a> {
             mount_id: (mnt != 0).then_some(mnt),
             fstype: info.map_or_else(|| "unknown".into(), |i| i.fstype.clone()),
             source: info.map(|i| i.source.clone()).unwrap_or_default(),
-            kind: info.map_or(FsKind::Disk, |i| i.kind),
+            kind: info.map_or(FsKind::Unknown, |i| i.kind),
             pool,
             decision,
         });
@@ -1135,4 +1138,77 @@ pub fn scan(root: &Path, config: &ScanConfig) -> io::Result<ScanResult> {
         subtree_scan: sc.subtree,
         unreached_includes,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_scope_implicitly_enters_only_recognized_local_kinds() {
+        for kind in [FsKind::Disk, FsKind::Memory] {
+            assert_eq!(boundary_skip_reason(ScanScope::All, kind, false), None);
+        }
+
+        for (kind, expected) in [
+            (FsKind::Pseudo, SkipReason::Pseudo),
+            (FsKind::Network, SkipReason::Network),
+            (FsKind::Image, SkipReason::Image),
+            (FsKind::Layered, SkipReason::Layered),
+            (FsKind::Unknown, SkipReason::Unknown),
+        ] {
+            assert_eq!(
+                boundary_skip_reason(ScanScope::All, kind, false),
+                Some(expected),
+                "{kind:?} must not be traversed implicitly",
+            );
+        }
+    }
+
+    #[test]
+    fn shared_and_fuse_block_mounts_require_explicit_includes() {
+        for fstype in ["gfs2", "ocfs2", "fuseblk"] {
+            let kind = FsKind::classify(fstype);
+            assert_eq!(
+                boundary_skip_reason(ScanScope::All, kind, false),
+                Some(SkipReason::Network),
+                "{fstype} must not be scanned implicitly",
+            );
+            assert_eq!(boundary_skip_reason(ScanScope::All, kind, true), None);
+        }
+    }
+
+    #[test]
+    fn explicit_includes_override_all_scope_and_kind_restrictions() {
+        for scope in [ScanScope::Root, ScanScope::Selected, ScanScope::All] {
+            for kind in [
+                FsKind::Disk,
+                FsKind::Memory,
+                FsKind::Pseudo,
+                FsKind::Network,
+                FsKind::Image,
+                FsKind::Layered,
+                FsKind::Unknown,
+            ] {
+                assert_eq!(
+                    boundary_skip_reason(scope, kind, true),
+                    None,
+                    "explicit include must win for {scope:?} and {kind:?}",
+                );
+            }
+        }
+
+        assert_eq!(
+            boundary_skip_reason(ScanScope::Root, FsKind::Disk, false),
+            Some(SkipReason::OutOfScope)
+        );
+        assert_eq!(
+            boundary_skip_reason(ScanScope::Selected, FsKind::Memory, false),
+            Some(SkipReason::OutOfScope)
+        );
+        assert_eq!(
+            boundary_skip_reason(ScanScope::Selected, FsKind::Unknown, false),
+            Some(SkipReason::Unknown)
+        );
+    }
 }
