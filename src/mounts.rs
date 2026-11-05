@@ -52,8 +52,9 @@ impl FsKind {
             // Shared cluster filesystems and FUSE-backed block mounts are
             // opt-in, even when an instance (e.g. NTFS-3G) is backed locally.
             "nfs" | "nfs4" | "cifs" | "smb3" | "smbfs" | "afs" | "ceph" | "glusterfs"
-            | "lustre" | "9p" | "virtiofs" | "davfs" | "ncpfs" | "gfs2" | "ocfs2"
-            | "fuseblk" => Self::Network,
+            | "lustre" | "9p" | "virtiofs" | "davfs" | "ncpfs" | "gfs2" | "ocfs2" | "fuseblk" => {
+                Self::Network
+            }
             "squashfs" | "erofs" | "cramfs" => Self::Image,
             "overlay" | "aufs" => Self::Layered,
             t if t == "fuse" || t.starts_with("fuse.") => Self::Network,
