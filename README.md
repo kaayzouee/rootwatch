@@ -9,7 +9,7 @@
 <h1>Showcase</h1>
 
 <img width="922" alt="Rootwatch v0.4.0 scanned with sudo (in Coverage)" src="media/v0.4.0.showcase.png"/>
-<br><br>
+<br>
 <h1>Overview</h1>
 
 <table border="1" cellpadding="5" cellspacing="0">
@@ -321,7 +321,7 @@
       <td>move selection</td>
     </tr>
     <tr>
-      <td><code>h</code> <code>l</code> / <code>←</code> <code>-></code></td>
+      <td><code>h</code> <code>l</code> / <code>←</code> <code>→</code></td>
       <td>tree: collapse / expand · zones: switch type</td>
     </tr>
     <tr>
