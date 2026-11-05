@@ -1,4 +1,8 @@
-<h1>rootwatch - <a href="CHANGELOG.md">v0.4.0</a></h1>
+<p align="center">
+  <a href="CHANGELOG.md">
+    <img src="media/rootwatch-logo.png" alt="Rootwatch logo" width="760">
+  </a>
+</p>
 
 <p>Read-only Linux filesystem scanner with a SOC-style disk TUI.</p>
 
