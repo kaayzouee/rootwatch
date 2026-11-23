@@ -1125,6 +1125,9 @@ fn titled_findings_are_distinguishable_and_wording_is_natural() {
     let fx = Fixture::new("tuiwording");
     fx.file("t/old/blob", 12 * MIB);
     fx.set_age_days("t/old/blob", 60, NOW);
+    for dir in ["t/old", "t", ""] {
+        fx.set_age_days(dir, 60, NOW);
+    }
     let mut c = ScanConfig {
         now_unix: Some(NOW),
         ..ScanConfig::default()
